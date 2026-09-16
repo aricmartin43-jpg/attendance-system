@@ -1,0 +1,26 @@
+# Render.com deployment blueprint for Cosmos Groups Attendance.
+#
+# IMPORTANT: this does NOT provision a Render Postgres database, because
+# Render's free Postgres tier expires and is deleted after 30 days — which
+# would silently wipe your attendance data. Instead, create a free permanent
+# Postgres database at https://neon.tech (or supabase.com) and paste its
+# connection string into DATABASE_URL below (in the Render dashboard, not
+# in this file, so it isn't committed to git).
+#
+# In the Render dashboard: New -> Blueprint -> point at this repo.
+services:
+  - type: web
+    name: cosmos-groups-attendance
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # set manually in the Render dashboard to your Neon/Supabase connection string
+      - key: OFFICE_LAT
+        value: "REPLACE_WITH_OFFICE_LATITUDE"
+      - key: OFFICE_LNG
+        value: "REPLACE_WITH_OFFICE_LONGITUDE"
+      - key: GEOFENCE_RADIUS_METERS
+        value: "150"
