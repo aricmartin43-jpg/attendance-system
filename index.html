@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f172a">
+<title>Cosmos Groups Attendance</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 pb-20">
+
+<header class="bg-slate-900 text-white px-4 py-3 sticky top-0 z-10">
+  <h1 class="text-lg font-semibold text-center">Cosmos Groups Attendance</h1>
+</header>
+
+<main class="max-w-md mx-auto p-4">
+
+  <!-- SCAN TAB -->
+  <section id="tab-scan" class="tab-panel">
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-base font-semibold mb-3 text-center">Check In / Check Out</h2>
+      <video id="scan-video" autoplay playsinline muted class="rounded-lg border w-full aspect-[4/3] bg-black object-cover"></video>
+      <canvas id="scan-canvas" class="hidden"></canvas>
+
+      <div id="geo-status" class="text-xs text-center mt-2 text-slate-500">Checking location…</div>
+
+      <div class="grid grid-cols-2 gap-3 mt-4">
+        <button id="btn-check-in" class="btn-primary py-3">Check In</button>
+        <button id="btn-check-out" class="btn-secondary py-3">Check Out</button>
+      </div>
+
+      <div id="scan-result" class="rounded-lg border mt-4 p-4 min-h-[90px] flex items-center justify-center text-slate-400 text-center">
+        Position your face and tap Check In / Check Out
+      </div>
+    </div>
+  </section>
+
+  <!-- REGISTER TAB -->
+  <section id="tab-register" class="tab-panel hidden">
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-base font-semibold mb-3 text-center">Register Employee</h2>
+      <video id="reg-video" autoplay playsinline muted class="rounded-lg border w-full aspect-[4/3] bg-black object-cover"></video>
+      <canvas id="reg-canvas" class="hidden"></canvas>
+      <button id="btn-capture" class="btn-secondary mt-3 w-full py-3">Capture Face</button>
+
+      <form id="register-form" class="space-y-3 mt-4">
+        <div>
+          <label class="text-sm font-medium">Full Name</label>
+          <input type="text" id="reg-name" required class="input-field" placeholder="Jane Doe">
+        </div>
+        <div>
+          <label class="text-sm font-medium">Employee Code</label>
+          <input type="text" id="reg-code" required class="input-field" placeholder="EMP-1023">
+        </div>
+        <div id="reg-preview" class="text-xs text-slate-500">No face captured yet.</div>
+        <button type="submit" class="btn-primary w-full py-3">Register Employee</button>
+        <div id="reg-message" class="text-sm"></div>
+      </form>
+
+      <hr class="my-5">
+
+      <h3 class="font-semibold mb-2 text-sm">Registered Employees</h3>
+      <div id="employee-list" class="divide-y text-sm"></div>
+    </div>
+  </section>
+
+  <!-- REPORTS TAB -->
+  <section id="tab-reports" class="tab-panel hidden">
+    <div class="bg-white rounded-xl shadow p-4">
+      <h2 class="text-base font-semibold mb-3 text-center">Attendance Report</h2>
+      <div class="flex gap-2 mb-3">
+        <input type="date" id="report-date" class="input-field">
+        <button id="btn-filter" class="btn-secondary px-3">Go</button>
+      </div>
+      <div class="flex gap-2 mb-4">
+        <button id="btn-clear-filter" class="btn-secondary flex-1 text-xs py-2">Show All</button>
+        <a id="btn-export" href="/api/export" class="btn-primary flex-1 text-xs py-2 text-center">Export CSV</a>
+      </div>
+      <div id="attendance-list" class="divide-y text-sm"></div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="fixed bottom-0 left-0 right-0 bg-slate-900 text-white flex justify-around py-2 z-10">
+  <button class="tab-btn flex-1 py-2" data-tab="scan">Scan</button>
+  <button class="tab-btn flex-1 py-2" data-tab="register">Register</button>
+  <button class="tab-btn flex-1 py-2" data-tab="reports">Reports</button>
+</nav>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
