@@ -167,7 +167,7 @@ def scan_face():
     face_locations = face_recognition.face_locations(image)
     if len(face_locations) == 0:
         return jsonify({"matched": False, "message": "No face detected"}), 200
-
+    app.logger.exception('Request failed')
     encodings = face_recognition.face_encodings(image, known_face_locations=face_locations)
     probe = encodings[0]
 
