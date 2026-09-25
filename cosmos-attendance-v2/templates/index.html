@@ -39,11 +39,67 @@
       <section id="reports-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Monthly attendance</h2><p class="muted">Download a CSV for Excel or Google Sheets.</p></div><div class="report-controls"><label class="compact-label">Month<input type="month" id="month-filter"></label><button class="primary" id="export">↓ Export CSV</button></div></div><div id="monthly-table"></div></div><p class="help">Hours include the full time between check-in and check-out. Break deductions and payroll calculations are not included.</p></section>
 
       <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Mark attendance</button><button class="secondary wide" id="register-biometric">Set up / add biometric login</button><div class="steps"><span>01 · Camera</span><span>02 · Location</span><span>03 · Verify</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A moment to check in.</h2><ol><li><strong>Face the camera</strong><p>Use good lighting. Only your face should be visible.</p></li><li><strong>Allow location access</strong><p>Work from any location. GPS is saved with your attendance.</p></li><li><strong>Capture and confirm</strong><p>Your face is checked against your registered photo before attendance is saved.</p></li></ol><p class="help">Photos are stored privately. Location is collected only when you submit attendance.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
+
+      <section id="ecosystem-panel" class="panel-view" hidden>
+        <div class="stats">
+          <article class="stat"><span>Work reports</span><strong id="eco-work">0</strong><small>Recorded company memory</small></article>
+          <article class="stat"><span>Completed work</span><strong id="eco-completed">0</strong><small>Marked completed</small></article>
+          <article class="stat"><span>Open problems</span><strong id="eco-issues">0</strong><small>Need resolution</small></article>
+          <article class="stat"><span>Meeting actions</span><strong id="eco-actions">0</strong><small>Still open</small></article>
+        </div>
+        <div class="ecosystem-grid">
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">WORK MEMORY</span><h2>Daily work & jobs</h2><p class="muted">Capture what was done, for which job/customer, machine involved, difficulties and status.</p><button class="secondary" data-jump="work">Open daily work</button></article>
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">PROBLEM MEMORY</span><h2>Problems & resolutions</h2><p class="muted">Record material, machine, drawing, customer and process problems and how they were resolved.</p><button class="secondary" data-jump="issues">Open problems</button></article>
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">MEETING MEMORY</span><h2>Meetings & actions</h2><p class="muted">Keep decisions, owners, due dates and completion status searchable.</p><button class="secondary" data-jump="meetings">Open meetings</button></article>
+        </div>
+      </section>
+
+      <section id="work-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Daily work reports</h2><p class="muted">A permanent record of completed work, jobs, machines and difficulties.</p></div><button class="primary" id="add-work">+ Add work report</button></div><div id="work-table"></div></div>
+      </section>
+
+      <section id="issues-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Problems & difficulties</h2><p class="muted">Report blockers early and preserve the resolution for future jobs.</p></div><button class="primary" id="add-issue">+ Report problem</button></div><div id="issues-table"></div></div>
+      </section>
+
+      <section id="meetings-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Meetings & actions</h2><p class="muted">Decisions and assigned actions stay linked to responsible employees.</p></div><button class="primary" id="add-meeting">+ Create meeting</button></div><div id="meetings-list"></div></div>
+      </section>
     </main><footer class="app-footer">COSMOS ATTENDANCE <span>Company time zone: <span id="timezone-label">Asia/Kolkata</span></span></footer></div>
   </div>
 
   <dialog id="employee-dialog"><form id="employee-form"><input type="hidden" name="employee_id" id="employee-id"><div class="dialog-header"><h2 id="employee-dialog-title">Add employee</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="employee-dialog-note">Create an employee with a private 4-digit PIN.</p><label>Full name<input name="name" required maxlength="100" autocomplete="name"></label><label>Employee ID<input name="code" required maxlength="40" pattern="[a-zA-Z0-9_-]+" placeholder="CES001"></label><label>Department<select name="department"><option>Production</option><option>Laser</option><option>Service</option><option>Design</option><option>Administration</option><option>Other</option></select></label><label id="pin-label">Initial 4-digit PIN<input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password"></label><p class="help" id="pin-help">Use exactly 4 digits. The employee can later add phone biometric login.</p><button class="primary wide" id="employee-save" type="submit">Create employee</button></form></dialog>
 
+
+  <dialog id="work-dialog"><form id="work-form"><div class="dialog-header"><h2>Add work report</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label class="admin-employee-field">Employee<select name="employee_id" id="work-employee"></select></label>
+    <label>Work date<input type="date" name="date" id="work-date" required></label>
+    <div class="form-grid"><label>Job / Order No.<input name="job_no" maxlength="60" placeholder="e.g. JO-124"></label><label>Customer<input name="customer" maxlength="120"></label></div>
+    <label>Work details<textarea name="work_details" required maxlength="5000" rows="4" placeholder="Describe the work completed today..."></textarea></label>
+    <div class="form-grid"><label>Machine / Equipment<input name="machine" maxlength="120"></label><label>Status<select name="status"><option>Completed</option><option>In Progress</option><option>Blocked</option><option>Pending</option></select></label></div>
+    <label>Problems / difficulties<textarea name="problems" maxlength="5000" rows="3" placeholder="Material delay, drawing issue, machine problem, support needed..."></textarea></label>
+    <button class="primary wide" type="submit">Save work report</button>
+  </form></dialog>
+
+  <dialog id="issue-dialog"><form id="issue-form"><div class="dialog-header"><h2>Report a problem</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label class="admin-employee-field">Employee<select name="employee_id" id="issue-employee"></select></label>
+    <label>Date<input type="date" name="date" id="issue-date" required></label>
+    <label>Category<select name="category"><option>Machine</option><option>Material</option><option>Drawing</option><option>Customer</option><option>Quality</option><option>Safety</option><option>Process</option><option>Other</option></select></label>
+    <label>Problem title<input name="title" maxlength="160" required></label>
+    <label>Details<textarea name="detail" maxlength="5000" rows="5" required placeholder="What happened? What is blocked? What support is needed?"></textarea></label>
+    <button class="primary wide" type="submit">Submit problem</button>
+  </form></dialog>
+
+  <dialog id="meeting-dialog"><form id="meeting-form"><div class="dialog-header"><h2>Create meeting</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Date<input type="date" name="date" id="meeting-date" required></label>
+    <label>Meeting title<input name="title" maxlength="160" required placeholder="Production review"></label>
+    <label>Notes / decisions<textarea name="notes" maxlength="8000" rows="5" placeholder="Key discussion and decisions..."></textarea></label>
+    <label>Action owner<select id="meeting-employee"></select></label>
+    <label>Action<input id="meeting-action" maxlength="5000" placeholder="What needs to be done?"></label>
+    <label>Due date<input type="date" id="meeting-due"></label>
+    <p class="help">Version 1 supports one action while creating a meeting. More actions can be added in the next update.</p>
+    <button class="primary wide" type="submit">Save meeting</button>
+  </form></dialog>
   <dialog id="camera-dialog"><div class="dialog-header"><h2 id="camera-title">Verify your attendance</h2><button class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="camera-description">Face the camera and allow location access.</p><div class="camera-frame"><video id="video" autoplay playsinline muted></video><div class="face-guide" aria-hidden="true"></div></div><p id="camera-status" role="status">Starting camera…</p><label id="consent-label" class="consent" hidden><input type="checkbox" id="consent">The employee agrees to face-template, photo and attendance-location storage, and understands how to request removal.</label><p class="help">Face matching is not certified liveness detection and cannot guarantee protection against photo spoofing.</p><button id="capture-button" class="primary wide" disabled>Capture and verify</button></dialog>
   <div id="notice" role="status" aria-live="polite" hidden></div>
 </body></html>
