@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let csrf = '', user = null, team = [], today = '', zone = 'Asia/Kolkata', currentView = '', openShift = null;
+let csrf = '', user = null, team = [], customers = [], machines = [], jobs = [], today = '', zone = 'Asia/Kolkata', currentView = '', openShift = null;
 let stream = null, cameraMode = null, challenge = '', toastTimer, cameraRun = 0;
 const escapeHTML = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(message, error = false) {
@@ -61,6 +61,71 @@ async function refreshMine() {
   attendanceTable('my-table', rows);
 }
 
+
+async function ensureCustomers(){
+  if(!customers.length) customers=await api('/api/customers');
+  return customers;
+}
+function customerOptions(selected=''){
+  return customers.map(c=>`<option value="${c.id}" ${String(c.id)===String(selected)?'selected':''}>${escapeHTML(c.name)} · ${escapeHTML(c.code||'')}</option>`).join('');
+}
+async function refreshCustomers(){
+  customers=await api('/api/customers');
+  if(!customers.length){$('customer-table').innerHTML='<div class="empty"><strong>No customers yet</strong>Add your first customer to begin the company network.</div>';$('customer-detail').innerHTML='';return;}
+  $('customer-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Industry</th><th>Contacts</th><th>Machines</th><th>Open jobs</th><th>Status</th><th></th></tr></thead><tbody>${customers.map(c=>`<tr><td><strong>${escapeHTML(c.name)}</strong><small class="muted">${escapeHTML(c.code||'')} · GST ${escapeHTML(c.gstin||'—')}</small></td><td>${escapeHTML(c.industry||'—')}</td><td>${c.contact_count}</td><td>${c.machine_count}</td><td>${c.open_jobs}</td><td>${statusPill(c.status)}</td><td><button class="small-button" data-customer-open="${c.id}">Open network</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+async function showCustomerDetail(id){
+  const c=await api('/api/customers/'+id);
+  $('customer-detail').innerHTML=`<article class="section-card customer-network"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(c.code||'CUSTOMER')}</span><h2>${escapeHTML(c.name)}</h2><p class="muted">${escapeHTML(c.address||'No address recorded')}</p></div><div class="action-buttons"><button class="secondary" data-add-contact="${c.id}">+ Contact</button><button class="secondary" data-add-machine-customer="${c.id}">+ Machine</button><button class="primary" data-add-job-customer="${c.id}">+ Work order</button></div></div>
+  <div class="network-columns">
+    <section><h3>Important people</h3>${c.contacts.length?c.contacts.map(x=>`<div class="network-item"><strong>${escapeHTML(x.name)}</strong><span>${escapeHTML(x.designation||x.department||'Contact')}</span><small>${escapeHTML(x.phone||'')} ${escapeHTML(x.email||'')}</small></div>`).join(''):'<p class="muted">No contacts yet.</p>'}</section>
+    <section><h3>Machines</h3>${c.machines.length?c.machines.map(m=>`<button class="network-item network-button" data-machine-open="${m.id}"><strong>${escapeHTML(m.customer_machine_no||m.code)}</strong><span>${escapeHTML(m.machine_type||'Machine')} · ${escapeHTML(m.model||'')}</span><small>${escapeHTML(m.code||'')}</small></button>`).join(''):'<p class="muted">No machines yet.</p>'}</section>
+    <section><h3>Recent work orders</h3>${c.jobs.length?c.jobs.slice(0,8).map(j=>`<div class="network-item"><strong>${escapeHTML(j.code)} · ${escapeHTML(j.title)}</strong><span>${escapeHTML(j.machine_no||'General')} · ${escapeHTML(j.status)}</span><small>${j.assignments.map(a=>escapeHTML(a.employee)).join(', ')||'Not assigned'}</small></div>`).join(''):'<p class="muted">No work orders yet.</p>'}</section>
+  </div></article>`;
+}
+async function refreshMachines(){
+  machines=await api('/api/machines');
+  if(!machines.length){$('machine-table').innerHTML='<div class="empty"><strong>No machines yet</strong>Add customer machines to create lifetime service histories.</div>';$('machine-history').innerHTML='';return;}
+  $('machine-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Cosmos ID</th><th>Customer</th><th>Customer Machine No.</th><th>Type</th><th>Make / Model</th><th>Status</th><th></th></tr></thead><tbody>${machines.map(m=>`<tr><td><strong>${escapeHTML(m.code)}</strong></td><td>${escapeHTML(m.customer||'—')}</td><td>${escapeHTML(m.customer_machine_no||'—')}</td><td>${escapeHTML(m.machine_type||'—')}</td><td>${escapeHTML([m.manufacturer,m.model].filter(Boolean).join(' / ')||'—')}</td><td>${statusPill(m.status)}</td><td><button class="small-button" data-machine-open="${m.id}">History</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+async function showMachineHistory(id){
+  const h=await api('/api/machines/'+id+'/history'),m=h.machine;
+  $('machine-history').innerHTML=`<article class="section-card machine-history-card"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(m.code)}</span><h2>${escapeHTML(m.customer_machine_no||m.model||'Machine')}</h2><p class="muted">${escapeHTML(m.customer||'')} · ${escapeHTML(m.machine_type||'')} · ${escapeHTML(m.manufacturer||'')} ${escapeHTML(m.model||'')}</p></div></div>
+  <div class="history-timeline">${[...h.work_reports.map(r=>({date:r.date,title:r.work_details,meta:r.employee+' · '+(r.job_no||'Work report'),status:r.status})),...h.jobs.map(j=>({date:j.start_date||'',title:j.title,meta:j.code+' · '+(j.assignments.map(a=>a.employee).join(', ')||'Not assigned'),status:j.status}))].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`<div class="history-entry"><span>${escapeHTML(x.date||'—')}</span><div><strong>${escapeHTML(x.title)}</strong><small>${escapeHTML(x.meta)}</small></div>${statusPill(x.status)}</div>`).join('')||'<div class="empty">No history recorded for this machine yet.</div>'}</div></article>`;
+}
+async function refreshJobs(){
+  jobs=await api('/api/work-orders');
+  if(!jobs.length){$('job-table').innerHTML='<div class="empty"><strong>No work orders yet</strong>Create a work order and assign responsibility.</div>';return;}
+  $('job-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Customer</th><th>Machine</th><th>Owner</th><th>Assigned</th><th>Target</th><th>Status</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${jobs.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small class="muted">${escapeHTML(j.title)} · ${escapeHTML(j.work_type)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.machine_no||j.machine_code||'General')}</td><td>${escapeHTML(j.job_owner?.name||'—')}</td><td class="wrap-cell">${escapeHTML(j.assignments.map(a=>a.employee+' ('+a.role+')').join(', ')||'—')}</td><td>${escapeHTML(j.target_date||'—')}</td><td>${statusPill(j.status)}</td>${user.admin?`<td><button class="small-button" data-job-status="${j.id}" data-current="${escapeHTML(j.status)}">Update</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function openCustomerDialog(){$('customer-form').reset();$('customer-dialog').showModal();}
+async function openMachineDialog(customerId=''){
+  await ensureCustomers();$('machine-form').reset();$('machine-customer').innerHTML=customerOptions(customerId);$('machine-dialog').showModal();
+}
+async function loadJobMachines(customerId){
+  const list=await api('/api/machines?customer_id='+encodeURIComponent(customerId));
+  $('job-machine').innerHTML='<option value="">General / no specific machine</option>'+list.map(m=>`<option value="${m.id}">${escapeHTML(m.customer_machine_no||m.code)} · ${escapeHTML(m.machine_type||'Machine')}</option>`).join('');
+}
+async function openJobDialog(customerId=''){
+  await Promise.all([ensureCustomers(),ensureTeam()]);
+  $('job-form').reset();$('job-customer').innerHTML=customerOptions(customerId);$('job-owner').innerHTML='<option value="">Not set</option>'+employeeOptions();$('job-supervisor').innerHTML='<option value="">Not set</option>'+employeeOptions();$('job-assigned').innerHTML='<option value="">Not assigned</option>'+employeeOptions();
+  if($('job-customer').value)await loadJobMachines($('job-customer').value);
+  $('job-dialog').showModal();
+}
+async function prepareWorkLinks(){
+  try{
+    jobs=await api('/api/work-orders');machines=await api('/api/machines');
+    $('work-order-link').innerHTML='<option value="">Not linked</option>'+jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+    $('work-machine-link').innerHTML='<option value="">Not linked</option>'+machines.map(m=>`<option value="${m.id}">${escapeHTML(m.code)} · ${escapeHTML(m.customer_machine_no||m.model||'Machine')}</option>`).join('');
+  }catch(_){}
+}
+async function runNetworkSearch(){
+  const q=$('network-search').value.trim();
+  if(q.length<2){$('network-results').innerHTML='';return;}
+  const rows=await api('/api/network/search?q='+encodeURIComponent(q));
+  $('network-results').innerHTML=rows.length?rows.map(r=>`<button class="search-result" data-search-type="${escapeHTML(r.type)}" data-search-id="${r.id}"><strong>${escapeHTML(r.title)}</strong><span>${escapeHTML(r.type)} · ${escapeHTML(r.code||'')} · ${escapeHTML(r.subtitle||'')}</span></button>`).join(''):'<div class="empty compact-empty">No matches found.</div>';
+}
+
 async function ensureTeam(){
   if(user.admin && !team.length) team=await api('/api/employees');
   return team;
@@ -97,7 +162,7 @@ async function refreshMeetings(){
 }
 async function openWorkDialog(){
   if(user.admin){await ensureTeam();$('work-employee').innerHTML=employeeOptions();}
-  $('work-form').reset();$('work-date').value=today;$('work-dialog').showModal();
+  $('work-form').reset();$('work-date').value=today;await prepareWorkLinks();$('work-dialog').showModal();
 }
 async function openIssueDialog(){
   if(user.admin){await ensureTeam();$('issue-employee').innerHTML=employeeOptions();}
@@ -110,6 +175,9 @@ async function openMeetingDialog(){
 const views = {
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
   ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
+  customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
+  machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
+  jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
   employees:['Employees','The people behind every working day.','⊞'],
   work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
   issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
@@ -118,7 +186,7 @@ const views = {
   checkin:['My attendance','Check in, get to work, and make today count.','◎']
 };
 async function navigate(view) {
-  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
+  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
   document.querySelectorAll('.nav-button').forEach(el => el.classList.toggle('active',el.dataset.view===view));
@@ -126,6 +194,9 @@ async function navigate(view) {
   if(view === 'overview') await refreshOverview();
   if(view === 'ecosystem') await refreshEcosystem();
   if(view === 'employees') await refreshEmployees();
+  if(view === 'customers') await refreshCustomers();
+  if(view === 'machines') await refreshMachines();
+  if(view === 'jobs') await refreshJobs();
   if(view === 'work') await refreshWork();
   if(view === 'issues') await refreshIssues();
   if(view === 'meetings') await refreshMeetings();
@@ -137,7 +208,7 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','ecosystem','employees','work','issues','meetings','reports'] : ['checkin','work','issues','meetings'];
+  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
   $('navigation').innerHTML = names.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${views[view][2]}</span>${view==='overview'?'Overview':views[view][0]}</button>`).join('');
@@ -170,6 +241,29 @@ $('export').addEventListener('click',()=>perform(async()=>{
   if(!response.ok){const error=await response.json();throw new Error(error.error);}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='cosmos-attendance-'+month+'.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }));
+
+
+$('add-customer').addEventListener('click',()=>perform(openCustomerDialog));
+$('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
+$('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
+$('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/customers','POST',Object.fromEntries(new FormData(e.currentTarget)));$('customer-dialog').close();await refreshCustomers();notice('Customer created.');});});
+$('contact-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;d.primary_contact=e.currentTarget.elements.primary_contact.checked;await api('/api/customers/'+id+'/contacts','POST',d);$('contact-dialog').close();await showCustomerDetail(id);notice('Customer contact saved.');});});
+$('machine-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/machines','POST',Object.fromEntries(new FormData(e.currentTarget)));$('machine-dialog').close();machines=[];await refreshMachines();notice('Machine created.');});});
+$('job-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget));d.assigned_employee_ids=d.assigned_employee_id?[Number(d.assigned_employee_id)]:[];delete d.assigned_employee_id;await api('/api/work-orders','POST',d);$('job-dialog').close();jobs=[];await refreshJobs();notice('Work order created.');});});
+$('job-customer').addEventListener('change',e=>perform(()=>loadJobMachines(e.target.value)));
+$('customer-table').addEventListener('click',e=>{const b=e.target.closest('[data-customer-open]');if(b)perform(()=>showCustomerDetail(b.dataset.customerOpen));});
+$('customer-detail').addEventListener('click',e=>perform(async()=>{
+  const c=e.target.closest('[data-add-contact]'),m=e.target.closest('[data-add-machine-customer]'),j=e.target.closest('[data-add-job-customer]'),mh=e.target.closest('[data-machine-open]');
+  if(c){$('contact-form').reset();$('contact-customer-id').value=c.dataset.addContact;$('contact-dialog').showModal();return;}
+  if(m){await openMachineDialog(m.dataset.addMachineCustomer);return;}
+  if(j){await openJobDialog(j.dataset.addJobCustomer);return;}
+  if(mh){await navigate('machines');await showMachineHistory(mh.dataset.machineOpen);}
+}));
+$('machine-table').addEventListener('click',e=>{const b=e.target.closest('[data-machine-open]');if(b)perform(()=>showMachineHistory(b.dataset.machineOpen));});
+$('job-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-job-status]');if(!b)return;const next=prompt('Status: Open, In Progress, On Hold, Completed, Closed or Cancelled',b.dataset.current);if(next===null)return;const allowed=['Open','In Progress','On Hold','Completed','Closed','Cancelled'];if(!allowed.includes(next))throw new Error('Use one of: '+allowed.join(', '));await api('/api/work-orders/'+b.dataset.jobStatus,'PATCH',{status:next,completed_date:next==='Completed'?today:null});await refreshJobs();notice('Work order updated.');}));
+let networkTimer;
+$('network-search').addEventListener('input',()=>{clearTimeout(networkTimer);networkTimer=setTimeout(()=>perform(runNetworkSearch),250);});
+$('network-results').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-search-type]');if(!b)return;const type=b.dataset.searchType,id=b.dataset.searchId;if(type==='Customer'){await showCustomerDetail(id);}else if(type==='Machine'){await navigate('machines');await showMachineHistory(id);}else if(type==='Work Order'){await navigate('jobs');}else if(type==='Employee'){await navigate('employees');}}));
 
 $('add-work').addEventListener('click',()=>perform(openWorkDialog));
 $('add-issue').addEventListener('click',()=>perform(openIssueDialog));
