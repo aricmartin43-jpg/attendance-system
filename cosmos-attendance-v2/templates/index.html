@@ -135,7 +135,9 @@
   <dialog id="work-dialog"><form id="work-form"><div class="dialog-header"><h2>Add work report</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
     <label class="admin-employee-field">Employee<select name="employee_id" id="work-employee"></select></label>
     <label>Work date<input type="date" name="date" id="work-date" required></label>
-    <div class="form-grid"><label>Job / Order No.<input name="job_no" maxlength="60" placeholder="e.g. JO-124"></label><label>Customer<input name="customer" maxlength="120"></label></div>
+    <label>Linked work order<select name="work_order_id" id="work-order-link"><option value="">Not linked</option></select></label>
+    <label>Linked machine<select name="machine_id" id="work-machine-link"><option value="">Not linked</option></select></label>
+    <div class="form-grid"><label>Job / Order No.<input name="job_no" maxlength="60" placeholder="e.g. JO-2026-0001"></label><label>Customer<input name="customer" maxlength="120"></label></div>
     <label>Work details<textarea name="work_details" required maxlength="5000" rows="4" placeholder="Describe the work completed today..."></textarea></label>
     <div class="form-grid"><label>Machine / Equipment<input name="machine" maxlength="120"></label><label>Status<select name="status"><option>Completed</option><option>In Progress</option><option>Blocked</option><option>Pending</option></select></label></div>
     <label>Problems / difficulties<textarea name="problems" maxlength="5000" rows="3" placeholder="Material delay, drawing issue, machine problem, support needed..."></textarea></label>
