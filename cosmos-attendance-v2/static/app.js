@@ -60,15 +60,75 @@ async function refreshMine() {
   $('start-attendance').disabled = !user.enrolled || (!openShift && finished);
   attendanceTable('my-table', rows);
 }
-const views = {overview:['Attendance overview',"A clear view of your team's working day.",'▦'],employees:['Employees','The people behind every working day.','⊞'],reports:['Monthly reports','Attendance records, ready for your monthly review.','▤'],checkin:['My attendance','Check in, get to work, and make today count.','◎']};
+
+async function ensureTeam(){
+  if(user.admin && !team.length) team=await api('/api/employees');
+  return team;
+}
+function employeeOptions(selected=''){
+  const rows=user.admin?team:[{id:user.id,name:user.name,code:user.code}];
+  return rows.map(e=>`<option value="${e.id}" ${String(e.id)===String(selected)?'selected':''}>${escapeHTML(e.name)} · ${escapeHTML(e.code.toUpperCase())}</option>`).join('');
+}
+async function refreshEcosystem(){
+  const x=await api('/api/ecosystem/summary');
+  $('eco-work').textContent=x.work_reports;
+  $('eco-completed').textContent=x.completed_work;
+  $('eco-issues').textContent=x.open_issues;
+  $('eco-actions').textContent=x.open_meeting_actions;
+}
+function statusPill(status){
+  const warning=['Blocked','Pending','Open','In Progress'].includes(status);
+  return `<span class="pill ${warning?'warning':'neutral'}">${escapeHTML(status)}</span>`;
+}
+async function refreshWork(){
+  const rows=await api('/api/work-reports');
+  if(!rows.length){$('work-table').innerHTML='<div class="empty"><strong>No work reports yet</strong>Add the first daily work report to start building the company memory.</div>';return;}
+  $('work-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Job / Customer</th><th>Work</th><th>Machine</th><th>Status</th><th>Problems</th>${user.admin?'<th>Review</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td><strong>${escapeHTML(r.job_no||'—')}</strong><small class="muted">${escapeHTML(r.customer||'')}</small></td><td class="wrap-cell">${escapeHTML(r.work_details)}</td><td>${escapeHTML(r.machine||'—')}</td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.problems||'—')}</td>${user.admin?`<td><button class="small-button" data-work-review="${r.id}">${r.verified_by?'Reviewed':'Review'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function refreshIssues(){
+  const rows=await api('/api/issues');
+  if(!rows.length){$('issues-table').innerHTML='<div class="empty"><strong>No problems recorded</strong>Reported difficulties and their resolutions will appear here.</div>';return;}
+  $('issues-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Category</th><th>Problem</th><th>Status</th><th>Resolution</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td>${escapeHTML(r.category)}</td><td class="wrap-cell"><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.detail)}</small></td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.resolution||'—')}</td>${user.admin?`<td><button class="small-button" data-issue-resolve="${r.id}">${r.status==='Resolved'?'Edit resolution':'Resolve'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function refreshMeetings(){
+  const rows=await api('/api/meetings');
+  if(!rows.length){$('meetings-list').innerHTML='<div class="empty"><strong>No meeting actions yet</strong>Meeting decisions and assigned actions will appear here.</div>';return;}
+  $('meetings-list').innerHTML=rows.map(m=>`<article class="meeting-card"><div><span class="eyebrow accent">${escapeHTML(m.date)}</span><h3>${escapeHTML(m.title)}</h3><p class="muted">${escapeHTML(m.notes||'No notes recorded.')}</p></div><div class="meeting-actions">${m.actions.length?m.actions.map(a=>`<div class="meeting-action"><div><strong>${escapeHTML(a.action)}</strong><small>${escapeHTML(a.employee)} · Due ${escapeHTML(a.due_date||'not set')}</small></div><div>${statusPill(a.status)} ${(!user.admin&&a.employee_id===user.id)||user.admin?`<button class="small-button" data-action-update="${a.id}" data-current="${escapeHTML(a.status)}">Update</button>`:''}</div></div>`).join(''):'<p class="muted">No actions assigned.</p>'}</div></article>`).join('');
+}
+async function openWorkDialog(){
+  if(user.admin){await ensureTeam();$('work-employee').innerHTML=employeeOptions();}
+  $('work-form').reset();$('work-date').value=today;$('work-dialog').showModal();
+}
+async function openIssueDialog(){
+  if(user.admin){await ensureTeam();$('issue-employee').innerHTML=employeeOptions();}
+  $('issue-form').reset();$('issue-date').value=today;$('issue-dialog').showModal();
+}
+async function openMeetingDialog(){
+  await ensureTeam();$('meeting-form').reset();$('meeting-date').value=today;$('meeting-employee').innerHTML=employeeOptions();$('meeting-dialog').showModal();
+}
+
+const views = {
+  overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
+  ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
+  employees:['Employees','The people behind every working day.','⊞'],
+  work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
+  issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
+  meetings:['Meetings & actions','Decisions, owners, deadlines and follow-up.','☷'],
+  reports:['Monthly reports','Attendance records, ready for your monthly review.','▤'],
+  checkin:['My attendance','Check in, get to work, and make today count.','◎']
+};
 async function navigate(view) {
-  if (!views[view] || (user.admin ? view === 'checkin' : view !== 'checkin')) throw new Error('This page is not available.');
+  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
   document.querySelectorAll('.nav-button').forEach(el => el.classList.toggle('active',el.dataset.view===view));
   $('page-title').textContent=views[view][0]; $('page-subtitle').textContent=views[view][1]; $('breadcrumb').textContent=views[view][0];
   if(view === 'overview') await refreshOverview();
+  if(view === 'ecosystem') await refreshEcosystem();
   if(view === 'employees') await refreshEmployees();
+  if(view === 'work') await refreshWork();
+  if(view === 'issues') await refreshIssues();
+  if(view === 'meetings') await refreshMeetings();
   if(view === 'reports') attendanceTable('monthly-table',await api('/api/attendance?month='+$('month-filter').value),true);
   if(view === 'checkin') await refreshMine();
 }
@@ -77,7 +137,9 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','employees','reports'] : ['checkin'];
+  const names = user.admin ? ['overview','ecosystem','employees','work','issues','meetings','reports'] : ['checkin','work','issues','meetings'];
+  document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
+  $('add-meeting').hidden=!user.admin;
   $('navigation').innerHTML = names.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${views[view][2]}</span>${view==='overview'?'Overview':views[view][0]}</button>`).join('');
   await navigate(names[0]);
 }
@@ -108,6 +170,45 @@ $('export').addEventListener('click',()=>perform(async()=>{
   if(!response.ok){const error=await response.json();throw new Error(error.error);}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='cosmos-attendance-'+month+'.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }));
+
+$('add-work').addEventListener('click',()=>perform(openWorkDialog));
+$('add-issue').addEventListener('click',()=>perform(openIssueDialog));
+$('add-meeting').addEventListener('click',()=>perform(openMeetingDialog));
+document.querySelectorAll('[data-jump]').forEach(b=>b.addEventListener('click',()=>perform(()=>navigate(b.dataset.jump))));
+$('work-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const data=Object.fromEntries(new FormData(e.currentTarget));if(!user.admin)delete data.employee_id;
+  await api('/api/work-reports','POST',data);$('work-dialog').close();await refreshWork();notice('Work report saved.');
+});});
+$('issue-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const data=Object.fromEntries(new FormData(e.currentTarget));if(!user.admin)delete data.employee_id;
+  await api('/api/issues','POST',data);$('issue-dialog').close();await refreshIssues();notice('Problem recorded.');
+});});
+$('meeting-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const fd=new FormData(e.currentTarget), action=$('meeting-action').value.trim();
+  const actions=action?[{employee_id:Number($('meeting-employee').value),action,due_date:$('meeting-due').value||null}]:[];
+  await api('/api/meetings','POST',{date:fd.get('date'),title:fd.get('title'),notes:fd.get('notes'),actions});
+  $('meeting-dialog').close();await refreshMeetings();notice('Meeting saved.');
+});});
+$('work-table').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-work-review]');if(!b)return;
+  const note=prompt('Supervisor note (optional):','');if(note===null)return;
+  await api('/api/work-reports/'+b.dataset.workReview,'PATCH',{supervisor_note:note,verify:true});
+  await refreshWork();notice('Work report reviewed.');
+}));
+$('issues-table').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-issue-resolve]');if(!b)return;
+  const resolution=prompt('Resolution / corrective action:','');if(resolution===null||!resolution.trim())return;
+  await api('/api/issues/'+b.dataset.issueResolve,'PATCH',{status:'Resolved',resolution});
+  await refreshIssues();notice('Problem marked resolved.');
+}));
+$('meetings-list').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-action-update]');if(!b)return;
+  const choices=['Open','In Progress','Completed','Closed'];const current=b.dataset.current;
+  const next=prompt('Status: Open, In Progress, Completed or Closed',current);if(next===null)return;
+  if(!choices.includes(next))throw new Error('Use one of: '+choices.join(', '));
+  await api('/api/meeting-actions/'+b.dataset.actionUpdate,'PATCH',{status:next});await refreshMeetings();notice('Meeting action updated.');
+}));
+
 $('add-employee').addEventListener('click',()=>{const f=$('employee-form');f.reset();$('employee-id').value='';$('employee-dialog-title').textContent='Add employee';$('employee-dialog-note').textContent='Create an employee with a private 4-digit PIN.';$('pin-label').hidden=false;$('pin-help').hidden=false;$('employee-save').textContent='Create employee';f.elements.pin.required=true;$('employee-dialog').showModal();});
 $('employee-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
   const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;
