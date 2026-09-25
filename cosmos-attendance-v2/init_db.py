@@ -8,23 +8,18 @@ def initialise():
     Base.metadata.create_all(engine)
     admin_code = os.getenv('ADMIN_USERNAME', 'admin').lower().strip()
     admin_pin = os.getenv('ADMIN_PIN', '').strip()
-    fallback = os.getenv('ADMIN_PASSWORD', '').strip()
-    if re.fullmatch(r'\d{4}', admin_pin):
-        admin_secret = admin_pin
-    elif len(fallback) >= 12:
-        admin_secret = fallback
-    else:
-        raise RuntimeError('Set ADMIN_PIN to 4 digits or ADMIN_PASSWORD to at least 12 characters.')
+    if not re.fullmatch(r'\d{4}', admin_pin):
+        raise RuntimeError('ADMIN_PIN must be set to exactly 4 digits.')
     with DB.begin() as db:
         admin = db.scalar(select(Employee).where(Employee.admin == True))
         if admin:
             admin.code = admin_code
-            admin.password = generate_password_hash(admin_secret)
+            admin.password = generate_password_hash(admin_pin)
             admin.active = True
-            return
-        db.add(Employee(code=admin_code, name='Cosmos Admin',
-                        department='Administration', admin=True,
-                        password=generate_password_hash(admin_secret)))
+        else:
+            db.add(Employee(code=admin_code, name='Cosmos Admin',
+                            department='Administration', admin=True, active=True,
+                            password=generate_password_hash(admin_pin)))
 
 if __name__ == '__main__':
     initialise()
