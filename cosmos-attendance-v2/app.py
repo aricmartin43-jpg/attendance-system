@@ -47,8 +47,15 @@ if PRODUCTION and ('sslmode=' not in DB_URL or 'sslmode=disable' in DB_URL):
     raise RuntimeError('Use a Neon connection URL with SSL enabled.')
 SECRET = os.getenv('SECRET_KEY', '')
 if len(SECRET) < 32:
-    raise RuntimeError('Set a random SECRET_KEY with at least 32 characters.')
-CIPHER = Fernet(os.environ['FACE_ENCRYPTION_KEY'].encode())
+    if PRODUCTION:
+        raise RuntimeError('Set a random SECRET_KEY with at least 32 characters.')
+    SECRET = secrets.token_urlsafe(48)
+_face_key = os.getenv('FACE_ENCRYPTION_KEY', '')
+if not _face_key:
+    if PRODUCTION:
+        raise RuntimeError('Set FACE_ENCRYPTION_KEY.')
+    _face_key = Fernet.generate_key().decode()
+CIPHER = Fernet(_face_key.encode())
 THRESHOLD = float(os.getenv('FACE_THRESHOLD', '0.48'))
 if not 0.3 <= THRESHOLD <= 0.6:
     raise RuntimeError('FACE_THRESHOLD must be between 0.3 and 0.6.')
