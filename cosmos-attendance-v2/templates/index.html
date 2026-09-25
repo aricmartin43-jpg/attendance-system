@@ -54,6 +54,25 @@
         </div>
       </section>
 
+
+      <section id="customers-panel" class="panel-view" hidden>
+        <div class="section-card">
+          <div class="section-heading"><div><h2>Customer database</h2><p class="muted">Companies, important contacts, machines, jobs and service history in one place.</p></div><button class="primary" id="add-customer">+ Add customer</button></div>
+          <div class="network-search"><input id="network-search" placeholder="Search customer, machine, work order or employee..."><div id="network-results"></div></div>
+          <div id="customer-table"></div>
+        </div>
+        <div id="customer-detail"></div>
+      </section>
+
+      <section id="machines-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Customer machines</h2><p class="muted">Every machine gets its own permanent Cosmos ID and service history.</p></div><button class="primary" id="add-machine">+ Add machine</button></div><div id="machine-table"></div></div>
+        <div id="machine-history"></div>
+      </section>
+
+      <section id="jobs-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Work orders</h2><p class="muted">Customer work linked to machine, owner, assigned employees, supervisor and approval.</p></div><button class="primary" id="add-job">+ Create work order</button></div><div id="job-table"></div></div>
+      </section>
+
       <section id="work-panel" class="panel-view" hidden>
         <div class="section-card"><div class="section-heading"><div><h2>Daily work reports</h2><p class="muted">A permanent record of completed work, jobs, machines and difficulties.</p></div><button class="primary" id="add-work">+ Add work report</button></div><div id="work-table"></div></div>
       </section>
@@ -70,6 +89,48 @@
 
   <dialog id="employee-dialog"><form id="employee-form"><input type="hidden" name="employee_id" id="employee-id"><div class="dialog-header"><h2 id="employee-dialog-title">Add employee</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="employee-dialog-note">Create an employee with a private 4-digit PIN.</p><label>Full name<input name="name" required maxlength="100" autocomplete="name"></label><label>Employee ID<input name="code" required maxlength="40" pattern="[a-zA-Z0-9_-]+" placeholder="CES001"></label><label>Department<select name="department"><option>Production</option><option>Laser</option><option>Service</option><option>Design</option><option>Administration</option><option>Other</option></select></label><label id="pin-label">Initial 4-digit PIN<input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password"></label><p class="help" id="pin-help">Use exactly 4 digits. The employee can later add phone biometric login.</p><button class="primary wide" id="employee-save" type="submit">Create employee</button></form></dialog>
 
+
+
+  <dialog id="customer-dialog"><form id="customer-form"><div class="dialog-header"><h2>Add customer</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Company name<input name="name" required maxlength="180"></label>
+    <div class="form-grid"><label>GSTIN<input name="gstin" maxlength="30"></label><label>Industry<input name="industry" maxlength="100"></label></div>
+    <div class="form-grid"><label>Phone<input name="phone" maxlength="40"></label><label>Email<input name="email" type="email" maxlength="160"></label></div>
+    <label>Address<textarea name="address" rows="3" maxlength="5000"></textarea></label>
+    <label>Notes<textarea name="notes" rows="2" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Create customer</button>
+  </form></dialog>
+
+  <dialog id="contact-dialog"><form id="contact-form"><input type="hidden" name="customer_id" id="contact-customer-id"><div class="dialog-header"><h2>Add customer contact</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Name<input name="name" required maxlength="120"></label>
+    <div class="form-grid"><label>Designation<input name="designation" maxlength="120" placeholder="MD / Maintenance Manager"></label><label>Department<input name="department" maxlength="100"></label></div>
+    <div class="form-grid"><label>Phone<input name="phone" maxlength="40"></label><label>Email<input name="email" type="email" maxlength="160"></label></div>
+    <label class="checkbox-line"><input name="primary_contact" type="checkbox"> Primary contact</label>
+    <label>Notes<textarea name="notes" rows="2" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Save contact</button>
+  </form></dialog>
+
+  <dialog id="machine-dialog"><form id="machine-form"><div class="dialog-header"><h2>Add machine</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Customer<select name="customer_id" id="machine-customer" required></select></label>
+    <div class="form-grid"><label>Machine type<input name="machine_type" maxlength="120" placeholder="VMC / Turning / Grinding"></label><label>Customer machine No.<input name="customer_machine_no" maxlength="80" placeholder="VMC-02"></label></div>
+    <div class="form-grid"><label>Manufacturer<input name="manufacturer" maxlength="120"></label><label>Model<input name="model" maxlength="120"></label></div>
+    <div class="form-grid"><label>Serial No.<input name="serial_no" maxlength="120"></label><label>Controller<input name="controller" maxlength="120"></label></div>
+    <div class="form-grid"><label>Department<input name="department" maxlength="100"></label><label>Location<input name="location" maxlength="140"></label></div>
+    <label>Installation date<input name="installation_date" type="date"></label>
+    <label>Notes<textarea name="notes" rows="3" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Create machine</button>
+  </form></dialog>
+
+  <dialog id="job-dialog"><form id="job-form"><div class="dialog-header"><h2>Create work order</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Customer<select name="customer_id" id="job-customer" required></select></label>
+    <label>Machine<select name="machine_id" id="job-machine"><option value="">General / no specific machine</option></select></label>
+    <div class="form-grid"><label>Work type<select name="work_type"><option>Service</option><option>Manufacturing</option><option>Repair</option><option>Installation</option><option>Inspection</option><option>Preventive Maintenance</option></select></label><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
+    <label>Job title<input name="title" maxlength="180" required placeholder="Telescopic cover repair"></label>
+    <label>Description<textarea name="description" rows="4" maxlength="8000"></textarea></label>
+    <div class="form-grid"><label>Job owner<select name="job_owner_id" id="job-owner"></select></label><label>Supervisor<select name="supervisor_id" id="job-supervisor"></select></label></div>
+    <label>Assigned employee<select name="assigned_employee_id" id="job-assigned"></select></label>
+    <div class="form-grid"><label>Start date<input name="start_date" type="date"></label><label>Target date<input name="target_date" type="date"></label></div>
+    <button class="primary wide" type="submit">Create work order</button>
+  </form></dialog>
 
   <dialog id="work-dialog"><form id="work-form"><div class="dialog-header"><h2>Add work report</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
     <label class="admin-employee-field">Employee<select name="employee_id" id="work-employee"></select></label>
