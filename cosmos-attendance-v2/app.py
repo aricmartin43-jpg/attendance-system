@@ -1017,10 +1017,24 @@ def create_work_report():
         link_machine = data.get('machine_id')
         work_order_id = int(link_order) if link_order not in (None,'') else None
         machine_id = int(link_machine) if link_machine not in (None,'') else None
-        if work_order_id and not db.get(WorkOrder, work_order_id):
+        work_order = db.get(WorkOrder, work_order_id) if work_order_id else None
+        machine = db.get(CustomerMachine, machine_id) if machine_id else None
+        if work_order_id and not work_order:
             abort(404, 'Work order not found.')
-        if machine_id and not db.get(CustomerMachine, machine_id):
+        if machine_id and not machine:
             abort(404, 'Machine not found.')
+        if not request.employee.admin:
+            if work_order_id and not db.scalar(select(WorkOrderAssignment.id).where(
+                    WorkOrderAssignment.work_order_id==work_order_id,
+                    WorkOrderAssignment.employee_id==employee_id).limit(1)):
+                abort(403, 'You can only link work reports to your assigned work orders.')
+            if machine_id and not db.scalar(select(WorkOrderAssignment.id).join(
+                    WorkOrder, WorkOrder.id==WorkOrderAssignment.work_order_id).where(
+                    WorkOrderAssignment.employee_id==employee_id,
+                    WorkOrder.machine_id==machine_id).limit(1)):
+                abort(403, 'You can only link work reports to machines assigned to your work.')
+        if work_order_id and machine_id and work_order.machine_id and work_order.machine_id != machine_id:
+            abort(400, 'Selected machine does not match the selected work order.')
         if work_order_id or machine_id:
             db.add(WorkReportLink(work_report_id=r.id, work_order_id=work_order_id, machine_id=machine_id))
         e = db.get(Employee, employee_id)
