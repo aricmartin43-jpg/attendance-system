@@ -180,6 +180,114 @@ class MeetingAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Customer(Base):
+    __tablename__ = 'customers'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    gstin: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Active')
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CustomerSite(Base):
+    __tablename__ = 'customer_sites'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey('customers.id'), index=True)
+    name: Mapped[str] = mapped_column(String(140))
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CustomerContact(Base):
+    __tablename__ = 'customer_contacts'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey('customers.id'), index=True)
+    site_id: Mapped[int | None] = mapped_column(ForeignKey('customer_sites.id'), nullable=True)
+    name: Mapped[str] = mapped_column(String(120))
+    designation: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    primary_contact: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MachineType(Base):
+    __tablename__ = 'machine_types'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CustomerMachine(Base):
+    __tablename__ = 'customer_machines'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey('customers.id'), index=True)
+    site_id: Mapped[int | None] = mapped_column(ForeignKey('customer_sites.id'), nullable=True)
+    machine_type_id: Mapped[int | None] = mapped_column(ForeignKey('machine_types.id'), nullable=True)
+    customer_machine_no: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    serial_no: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    controller: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    installation_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Active')
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkOrder(Base):
+    __tablename__ = 'work_orders'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey('customers.id'), index=True)
+    site_id: Mapped[int | None] = mapped_column(ForeignKey('customer_sites.id'), nullable=True)
+    machine_id: Mapped[int | None] = mapped_column(ForeignKey('customer_machines.id'), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    work_type: Mapped[str] = mapped_column(String(60), default='Service')
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_owner_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    supervisor_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    start_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    target_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    completed_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Open')
+    priority: Mapped[str] = mapped_column(String(20), default='Normal')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkOrderAssignment(Base):
+    __tablename__ = 'work_order_assignments'
+    __table_args__ = (UniqueConstraint('work_order_id','employee_id','role', name='unique_work_assignment'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    role: Mapped[str] = mapped_column(String(50), default='Assigned')
+    responsibility: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkReportLink(Base):
+    __tablename__ = 'work_report_links'
+    __table_args__ = (UniqueConstraint('work_report_id', name='one_link_per_work_report'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_report_id: Mapped[int] = mapped_column(ForeignKey('work_reports.id'), index=True)
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True, index=True)
+    machine_id: Mapped[int | None] = mapped_column(ForeignKey('customer_machines.id'), nullable=True, index=True)
+
+
 app = Flask(__name__)
 app.config.update(SECRET_KEY=SECRET, MAX_CONTENT_LENGTH=3 * 1024 * 1024,
                   SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=PRODUCTION,
@@ -905,6 +1013,16 @@ def create_work_report():
                        problems=str(data.get('problems','')).strip()[:5000] or None,
                        created_at=now())
         db.add(r); db.flush()
+        link_order = data.get('work_order_id')
+        link_machine = data.get('machine_id')
+        work_order_id = int(link_order) if link_order not in (None,'') else None
+        machine_id = int(link_machine) if link_machine not in (None,'') else None
+        if work_order_id and not db.get(WorkOrder, work_order_id):
+            abort(404, 'Work order not found.')
+        if machine_id and not db.get(CustomerMachine, machine_id):
+            abort(404, 'Machine not found.')
+        if work_order_id or machine_id:
+            db.add(WorkReportLink(work_report_id=r.id, work_order_id=work_order_id, machine_id=machine_id))
         e = db.get(Employee, employee_id)
         db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,
                        action='create_work_report', target=f'{e.code}:{r.id}', detail=r.job_no, created_at=now()))
@@ -1037,6 +1155,330 @@ def update_meeting_action(action_id):
         db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,
                        action='update_meeting_action',target=f'action:{a.id}',detail=status,created_at=now()))
         return {'id':a.id,'status':a.status}
+
+
+def customer_json(c):
+    return dict(id=c.id, code=c.code, name=c.name, gstin=c.gstin, industry=c.industry,
+                phone=c.phone, email=c.email, address=c.address, status=c.status, notes=c.notes)
+
+
+def machine_json(m, customer=None, machine_type=None):
+    return dict(id=m.id, code=m.code, customer_id=m.customer_id,
+                customer=customer.name if customer else None, site_id=m.site_id,
+                machine_type_id=m.machine_type_id, machine_type=machine_type.name if machine_type else None,
+                customer_machine_no=m.customer_machine_no, manufacturer=m.manufacturer, model=m.model,
+                serial_no=m.serial_no, controller=m.controller, department=m.department, location=m.location,
+                installation_date=m.installation_date, status=m.status, notes=m.notes)
+
+
+def work_order_json(db, w):
+    customer=db.get(Customer,w.customer_id)
+    machine=db.get(CustomerMachine,w.machine_id) if w.machine_id else None
+    assignments=db.execute(select(WorkOrderAssignment,Employee).join(Employee,Employee.id==WorkOrderAssignment.employee_id)
+                           .where(WorkOrderAssignment.work_order_id==w.id).order_by(WorkOrderAssignment.id)).all()
+    def emp_name(emp_id):
+        e=db.get(Employee,emp_id) if emp_id else None
+        return dict(id=e.id,name=e.name,code=e.code) if e else None
+    return dict(id=w.id, code=w.code, customer_id=w.customer_id, customer=customer.name if customer else None,
+                machine_id=w.machine_id, machine_code=machine.code if machine else None,
+                machine_no=machine.customer_machine_no if machine else None, title=w.title, work_type=w.work_type,
+                description=w.description, job_owner=emp_name(w.job_owner_id), supervisor=emp_name(w.supervisor_id),
+                approved_by=emp_name(w.approved_by_id), start_date=w.start_date, target_date=w.target_date,
+                completed_date=w.completed_date, status=w.status, priority=w.priority,
+                assignments=[dict(id=a.id,employee_id=e.id,employee=e.name,code=e.code,role=a.role,
+                                  responsibility=a.responsibility) for a,e in assignments])
+
+
+@app.get('/api/customers')
+@login_required()
+def list_customers():
+    with DB() as db:
+        rows=db.scalars(select(Customer).order_by(Customer.name)).all()
+        out=[]
+        for c in rows:
+            machines=db.scalars(select(CustomerMachine).where(CustomerMachine.customer_id==c.id)).all()
+            contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id)).all()
+            open_jobs=db.scalars(select(WorkOrder).where(WorkOrder.customer_id==c.id,
+                              WorkOrder.status.notin_(['Completed','Closed','Cancelled']))).all()
+            item=customer_json(c)
+            item.update(machine_count=len(machines),contact_count=len(contacts),open_jobs=len(open_jobs))
+            out.append(item)
+        return jsonify(out)
+
+
+@app.post('/api/customers')
+@login_required(admin=True)
+def create_customer():
+    data=request.get_json() or {}
+    name=clean_text(data,'name',180)
+    with DB.begin() as db:
+        c=Customer(name=name,gstin=str(data.get('gstin','')).strip()[:30] or None,
+                   industry=str(data.get('industry','')).strip()[:100] or None,
+                   phone=str(data.get('phone','')).strip()[:40] or None,
+                   email=str(data.get('email','')).strip()[:160] or None,
+                   address=str(data.get('address','')).strip()[:5000] or None,
+                   status='Active',notes=str(data.get('notes','')).strip()[:5000] or None,created_at=now())
+        db.add(c);db.flush();c.code=f'CUS-{c.id:04d}'
+        db.add(AuditLog(admin_id=request.employee.id,action='create_customer',target=c.code,detail=c.name,created_at=now()))
+        return customer_json(c),201
+
+
+@app.get('/api/customers/<int:customer_id>')
+@login_required()
+def customer_detail(customer_id):
+    with DB() as db:
+        c=db.get(Customer,customer_id)
+        if not c: abort(404,'Customer not found.')
+        contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id)
+                           .order_by(CustomerContact.primary_contact.desc(),CustomerContact.name)).all()
+        sites=db.scalars(select(CustomerSite).where(CustomerSite.customer_id==c.id).order_by(CustomerSite.name)).all()
+        machines=[]
+        for m in db.scalars(select(CustomerMachine).where(CustomerMachine.customer_id==c.id).order_by(CustomerMachine.id.desc())):
+            machines.append(machine_json(m,c,db.get(MachineType,m.machine_type_id) if m.machine_type_id else None))
+        jobs=[work_order_json(db,w) for w in db.scalars(select(WorkOrder).where(WorkOrder.customer_id==c.id)
+                                                       .order_by(WorkOrder.id.desc()).limit(100))]
+        result=customer_json(c)
+        result.update(
+            contacts=[dict(id=x.id,name=x.name,designation=x.designation,department=x.department,phone=x.phone,
+                           email=x.email,primary_contact=x.primary_contact,site_id=x.site_id,notes=x.notes) for x in contacts],
+            sites=[dict(id=x.id,name=x.name,address=x.address,city=x.city,state=x.state,notes=x.notes) for x in sites],
+            machines=machines,jobs=jobs
+        )
+        return result
+
+
+@app.post('/api/customers/<int:customer_id>/contacts')
+@login_required(admin=True)
+def create_customer_contact(customer_id):
+    data=request.get_json() or {}
+    with DB.begin() as db:
+        if not db.get(Customer,customer_id): abort(404,'Customer not found.')
+        contact=CustomerContact(customer_id=customer_id,name=clean_text(data,'name',120),
+             designation=str(data.get('designation','')).strip()[:120] or None,
+             department=str(data.get('department','')).strip()[:100] or None,
+             phone=str(data.get('phone','')).strip()[:40] or None,email=str(data.get('email','')).strip()[:160] or None,
+             primary_contact=data.get('primary_contact') is True,notes=str(data.get('notes','')).strip()[:5000] or None)
+        db.add(contact);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='create_customer_contact',
+                        target=f'customer:{customer_id}',detail=contact.name,created_at=now()))
+        return {'id':contact.id,'ok':True},201
+
+
+@app.post('/api/customers/<int:customer_id>/sites')
+@login_required(admin=True)
+def create_customer_site(customer_id):
+    data=request.get_json() or {}
+    with DB.begin() as db:
+        if not db.get(Customer,customer_id): abort(404,'Customer not found.')
+        site=CustomerSite(customer_id=customer_id,name=clean_text(data,'name',140),
+                          address=str(data.get('address','')).strip()[:5000] or None,
+                          city=str(data.get('city','')).strip()[:80] or None,
+                          state=str(data.get('state','')).strip()[:80] or None,
+                          notes=str(data.get('notes','')).strip()[:5000] or None)
+        db.add(site);db.flush()
+        return {'id':site.id,'ok':True},201
+
+
+@app.get('/api/machine-types')
+@login_required()
+def list_machine_types():
+    with DB() as db:
+        return jsonify([dict(id=x.id,name=x.name,description=x.description)
+                        for x in db.scalars(select(MachineType).order_by(MachineType.name))])
+
+
+@app.post('/api/machine-types')
+@login_required(admin=True)
+def create_machine_type():
+    data=request.get_json() or {}
+    name=clean_text(data,'name',120)
+    with DB.begin() as db:
+        existing=db.scalar(select(MachineType).where(MachineType.name==name))
+        if existing: return dict(id=existing.id,name=existing.name),200
+        row=MachineType(name=name,description=str(data.get('description','')).strip()[:5000] or None)
+        db.add(row);db.flush()
+        return {'id':row.id,'name':row.name},201
+
+
+@app.get('/api/machines')
+@login_required()
+def list_machines():
+    customer_id=request.args.get('customer_id')
+    with DB() as db:
+        q=select(CustomerMachine).order_by(CustomerMachine.id.desc())
+        if customer_id:
+            try:q=q.where(CustomerMachine.customer_id==int(customer_id))
+            except ValueError:abort(400,'Choose a valid customer.')
+        out=[]
+        for m in db.scalars(q.limit(500)):
+            out.append(machine_json(m,db.get(Customer,m.customer_id),
+                       db.get(MachineType,m.machine_type_id) if m.machine_type_id else None))
+        return jsonify(out)
+
+
+@app.post('/api/machines')
+@login_required(admin=True)
+def create_machine():
+    data=request.get_json() or {}
+    try: customer_id=int(data.get('customer_id'))
+    except (TypeError,ValueError): abort(400,'Choose a customer.')
+    with DB.begin() as db:
+        customer=db.get(Customer,customer_id)
+        if not customer: abort(404,'Customer not found.')
+        type_id=None
+        type_name=str(data.get('machine_type','')).strip()
+        if data.get('machine_type_id'):
+            type_id=int(data['machine_type_id'])
+            if not db.get(MachineType,type_id): abort(404,'Machine type not found.')
+        elif type_name:
+            mt=db.scalar(select(MachineType).where(MachineType.name==type_name))
+            if not mt:
+                mt=MachineType(name=type_name[:120]);db.add(mt);db.flush()
+            type_id=mt.id
+        install=str(data.get('installation_date','')).strip()
+        if install: install=valid_iso_date(install,'installation date')
+        m=CustomerMachine(customer_id=customer_id,machine_type_id=type_id,
+             customer_machine_no=str(data.get('customer_machine_no','')).strip()[:80] or None,
+             manufacturer=str(data.get('manufacturer','')).strip()[:120] or None,
+             model=str(data.get('model','')).strip()[:120] or None,
+             serial_no=str(data.get('serial_no','')).strip()[:120] or None,
+             controller=str(data.get('controller','')).strip()[:120] or None,
+             department=str(data.get('department','')).strip()[:100] or None,
+             location=str(data.get('location','')).strip()[:140] or None,
+             installation_date=install or None,status='Active',
+             notes=str(data.get('notes','')).strip()[:5000] or None,created_at=now())
+        db.add(m);db.flush();m.code=f'MCH-{m.id:06d}'
+        db.add(AuditLog(admin_id=request.employee.id,action='create_machine',target=m.code,
+                        detail=f'{customer.name} / {m.customer_machine_no or ""}',created_at=now()))
+        return machine_json(m,customer,db.get(MachineType,type_id) if type_id else None),201
+
+
+@app.get('/api/machines/<int:machine_id>/history')
+@login_required()
+def machine_history(machine_id):
+    with DB() as db:
+        m=db.get(CustomerMachine,machine_id)
+        if not m: abort(404,'Machine not found.')
+        customer=db.get(Customer,m.customer_id)
+        jobs=db.scalars(select(WorkOrder).where(WorkOrder.machine_id==m.id).order_by(WorkOrder.id.desc())).all()
+        links=db.scalars(select(WorkReportLink).where(WorkReportLink.machine_id==m.id).order_by(WorkReportLink.id.desc())).all()
+        reports=[]
+        for link in links:
+            r=db.get(WorkReport,link.work_report_id)
+            if not r: continue
+            e=db.get(Employee,r.employee_id)
+            reports.append(work_report_json(r,e))
+        return dict(machine=machine_json(m,customer,db.get(MachineType,m.machine_type_id) if m.machine_type_id else None),
+                    jobs=[work_order_json(db,w) for w in jobs],work_reports=reports)
+
+
+@app.get('/api/work-orders')
+@login_required()
+def list_work_orders():
+    with DB() as db:
+        q=select(WorkOrder).order_by(WorkOrder.id.desc())
+        if not request.employee.admin:
+            ids=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            q=q.where(WorkOrder.id.in_(ids))
+        return jsonify([work_order_json(db,w) for w in db.scalars(q.limit(300))])
+
+
+@app.post('/api/work-orders')
+@login_required(admin=True)
+def create_work_order():
+    data=request.get_json() or {}
+    try: customer_id=int(data.get('customer_id'))
+    except (TypeError,ValueError): abort(400,'Choose a customer.')
+    title=clean_text(data,'title',180)
+    with DB.begin() as db:
+        if not db.get(Customer,customer_id): abort(404,'Customer not found.')
+        machine_id=int(data['machine_id']) if data.get('machine_id') else None
+        if machine_id:
+            machine=db.get(CustomerMachine,machine_id)
+            if not machine or machine.customer_id!=customer_id: abort(400,'Machine does not belong to this customer.')
+        def employee_id(key):
+            if not data.get(key): return None
+            try:value=int(data[key])
+            except (TypeError,ValueError):abort(400,f'Choose a valid {key.replace("_"," ")}.')
+            if not db.get(Employee,value):abort(404,'Employee not found.')
+            return value
+        start=valid_iso_date(data['start_date'],'start date') if data.get('start_date') else None
+        target=valid_iso_date(data['target_date'],'target date') if data.get('target_date') else None
+        w=WorkOrder(customer_id=customer_id,machine_id=machine_id,title=title,
+                    work_type=str(data.get('work_type','Service')).strip()[:60] or 'Service',
+                    description=str(data.get('description','')).strip()[:8000] or None,
+                    job_owner_id=employee_id('job_owner_id'),supervisor_id=employee_id('supervisor_id'),
+                    approved_by_id=employee_id('approved_by_id'),start_date=start,target_date=target,
+                    status=str(data.get('status','Open')).strip()[:30] or 'Open',
+                    priority=str(data.get('priority','Normal')).strip()[:20] or 'Normal',created_at=now())
+        db.add(w);db.flush();w.code=f'JO-{now().astimezone(LOCAL).year}-{w.id:04d}'
+        assigned=data.get('assigned_employee_ids') or []
+        for employee in assigned[:30]:
+            try:eid=int(employee)
+            except (TypeError,ValueError):continue
+            if db.get(Employee,eid):
+                db.add(WorkOrderAssignment(work_order_id=w.id,employee_id=eid,role='Assigned',
+                                           responsibility=None,assigned_at=now()))
+        db.add(AuditLog(admin_id=request.employee.id,action='create_work_order',target=w.code,detail=w.title,created_at=now()))
+        return work_order_json(db,w),201
+
+
+@app.post('/api/work-orders/<int:work_order_id>/assignments')
+@login_required(admin=True)
+def assign_work_order(work_order_id):
+    data=request.get_json() or {}
+    try:employee_id=int(data.get('employee_id'))
+    except (TypeError,ValueError):abort(400,'Choose an employee.')
+    with DB.begin() as db:
+        if not db.get(WorkOrder,work_order_id):abort(404,'Work order not found.')
+        if not db.get(Employee,employee_id):abort(404,'Employee not found.')
+        role=str(data.get('role','Assigned')).strip()[:50] or 'Assigned'
+        existing=db.scalar(select(WorkOrderAssignment).where(WorkOrderAssignment.work_order_id==work_order_id,
+                           WorkOrderAssignment.employee_id==employee_id,WorkOrderAssignment.role==role))
+        if existing: return {'id':existing.id,'ok':True}
+        a=WorkOrderAssignment(work_order_id=work_order_id,employee_id=employee_id,role=role,
+                              responsibility=str(data.get('responsibility','')).strip()[:5000] or None,assigned_at=now())
+        db.add(a);db.flush()
+        return {'id':a.id,'ok':True},201
+
+
+@app.patch('/api/work-orders/<int:work_order_id>')
+@login_required(admin=True)
+def update_work_order(work_order_id):
+    data=request.get_json() or {}
+    with DB.begin() as db:
+        w=db.get(WorkOrder,work_order_id)
+        if not w:abort(404,'Work order not found.')
+        if 'status' in data:w.status=str(data['status']).strip()[:30] or w.status
+        if 'completed_date' in data:
+            w.completed_date=valid_iso_date(data['completed_date'],'completed date') if data['completed_date'] else None
+        db.add(AuditLog(admin_id=request.employee.id,action='update_work_order',target=w.code or str(w.id),
+                        detail=w.status,created_at=now()))
+        return work_order_json(db,w)
+
+
+@app.get('/api/network/search')
+@login_required()
+def network_search():
+    q=str(request.args.get('q','')).strip()
+    if len(q)<2:return jsonify([])
+    term=f'%{q}%'
+    with DB() as db:
+        results=[]
+        for c in db.scalars(select(Customer).where(Customer.name.ilike(term)).limit(10)):
+            results.append(dict(type='Customer',id=c.id,code=c.code,title=c.name,subtitle=c.industry or c.address))
+        for m in db.scalars(select(CustomerMachine).where(
+                CustomerMachine.code.ilike(term) | CustomerMachine.customer_machine_no.ilike(term) |
+                CustomerMachine.model.ilike(term) | CustomerMachine.serial_no.ilike(term)).limit(10)):
+            c=db.get(Customer,m.customer_id)
+            results.append(dict(type='Machine',id=m.id,code=m.code,title=m.customer_machine_no or m.model or m.code,
+                                subtitle=c.name if c else None))
+        for w in db.scalars(select(WorkOrder).where(WorkOrder.code.ilike(term) | WorkOrder.title.ilike(term)).limit(10)):
+            c=db.get(Customer,w.customer_id)
+            results.append(dict(type='Work Order',id=w.id,code=w.code,title=w.title,subtitle=c.name if c else None))
+        for e in db.scalars(select(Employee).where(Employee.admin==False,Employee.name.ilike(term)).limit(10)):
+            results.append(dict(type='Employee',id=e.id,code=e.code,title=e.name,subtitle=e.department))
+        return jsonify(results[:30])
 
 
 @app.get('/api/export')
