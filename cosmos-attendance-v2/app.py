@@ -536,6 +536,13 @@ def delete_employee(employee_id):
         e = db.get(Employee, employee_id)
         if not e or e.admin:
             abort(404)
+        has_memory = (
+            db.scalar(select(WorkReport.id).where(WorkReport.employee_id == e.id).limit(1))
+            or db.scalar(select(WorkIssue.id).where(WorkIssue.employee_id == e.id).limit(1))
+            or db.scalar(select(MeetingAction.id).where(MeetingAction.employee_id == e.id).limit(1))
+        )
+        if has_memory:
+            abort(409, 'This employee has company-memory records. Deactivate the account instead of permanently removing it.')
         if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.out_at == None)):
             abort(409, 'This employee must check out before removal.')
         rows=db.scalars(select(Attendance).where(Attendance.employee_id == e.id)).all()
