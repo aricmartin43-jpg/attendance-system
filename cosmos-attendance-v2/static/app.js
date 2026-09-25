@@ -211,6 +211,7 @@ async function showApp() {
   const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
+  $('add-job').hidden=!user.admin;
   $('navigation').innerHTML = names.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${views[view][2]}</span>${view==='overview'?'Overview':views[view][0]}</button>`).join('');
   await navigate(names[0]);
 }
