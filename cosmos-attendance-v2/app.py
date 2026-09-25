@@ -315,7 +315,7 @@ def aware(dt):
 
 def person(e):
     return dict(id=e.id, code=e.code, name=e.name, department=e.department,
-                admin=e.admin, active=e.active, enrolled=bool(e.encoding))
+                admin=e.admin, active=e.active, enrolled=True, face_enabled=False)
 
 
 def record(r, e):
@@ -733,32 +733,8 @@ def remove_photo(public_id):
 
 @app.post('/api/employees/<int:employee_id>/enrol')
 @login_required(admin=True)
-@limiter.limit('10 per minute')
 def enrol(employee_id):
-    data = request.get_json()
-    if data.get('consent') is not True:
-        abort(400, 'Record the employee’s consent before enrolment.')
-    with DB() as db:
-        e = db.get(Employee, employee_id)
-        if not e or e.admin or not e.active:
-            abort(404)
-    encoding, raw = face_image(data.get('photo'))
-    photo = upload_photo(raw)
-    old = None
-    try:
-        with DB.begin() as db:
-            e = db.scalar(select(Employee).where(Employee.id == employee_id).with_for_update())
-            if not e or not e.active:
-                abort(409, 'Employee is no longer active.')
-            old = e.photo_id
-            e.photo_id = photo
-            e.encoding = CIPHER.encrypt(json.dumps(encoding.tolist()).encode()).decode()
-            e.consent_at = now()
-    except Exception:
-        remove_photo(photo)
-        raise
-    remove_photo(old)
-    return {'ok': True}
+    abort(410, 'Face recognition is disabled. Employees use PIN or biometric login with GPS attendance.')
 
 
 def gps(data):
@@ -778,54 +754,38 @@ def gps(data):
 @login_required()
 @limiter.limit('6 per minute')
 def mark_attendance():
-    data = request.get_json()
+    data = request.get_json() or {}
     action = data.get('action')
     if action not in ('in', 'out'):
         abort(400, 'Choose check-in or check-out.')
+    if request.employee.admin:
+        abort(403, 'Administrator accounts do not mark employee attendance.')
     lat, lng, accuracy = gps(data.get('location', {}))
-    if request.employee.admin or not request.employee.encoding:
-        abort(403, 'Ask your administrator to enrol your face first.')
-    # Validate again under the employee row lock before committing attendance.
-    if not request.employee.capture_token or data.get('challenge') != request.employee.capture_token or (now() - aware(request.employee.capture_at)).total_seconds() > 120:
-        abort(400, 'Camera session expired. Start the camera again.')
-    encoding, raw = face_image(data.get('photo'))
-    stored = np.array(json.loads(CIPHER.decrypt(request.employee.encoding.encode())))
-    distance = float(np.linalg.norm(stored - encoding))
-    if not math.isfinite(distance) or distance > THRESHOLD:
-        abort(403, 'Face did not match your registered photo. Try better lighting or contact your administrator.')
-    photo = None
-    try:
-        with DB.begin() as db:
-            e = db.scalar(select(Employee).where(Employee.id == request.employee.id).with_for_update())
-            if not e.active or e.encoding != request.employee.encoding:
-                abort(409, 'Your employee profile changed. Sign in again.')
-            if not e.capture_token or not secrets.compare_digest(str(data.get('challenge', '')), e.capture_token) or (now() - aware(e.capture_at)).total_seconds() > 120:
-                abort(409, 'This camera session expired or was already used. Try again.')
-            open_record = db.scalar(select(Attendance).where(Attendance.employee_id == e.id, Attendance.out_at == None))
-            stamp = now()
-            day = stamp.astimezone(LOCAL).date().isoformat()
-            if action == 'in':
-                if open_record:
-                    abort(409, 'You are already checked in. Check out first.')
-                if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.work_date == day)):
-                    abort(409, 'Attendance is complete for today. One shift per day is supported.')
-            elif not open_record:
+    with DB.begin() as db:
+        e = db.scalar(select(Employee).where(Employee.id == request.employee.id).with_for_update())
+        if not e or not e.active:
+            abort(401, 'Please sign in again.')
+        open_record = db.scalar(select(Attendance).where(Attendance.employee_id == e.id, Attendance.out_at == None))
+        stamp = now()
+        day = stamp.astimezone(LOCAL).date().isoformat()
+        if action == 'in':
+            if open_record:
+                abort(409, 'You are already checked in. Check out first.')
+            if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.work_date == day)):
+                abort(409, 'Attendance is complete for today. One shift per day is supported.')
+            r = Attendance(employee_id=e.id, work_date=day, in_at=stamp, in_lat=lat, in_lng=lng,
+                           in_accuracy=accuracy, in_photo='', in_distance=0.0)
+            db.add(r)
+        else:
+            if not open_record:
                 abort(409, 'You do not have an open check-in.')
-            photo = upload_photo(raw)
-            e.capture_token, e.capture_at = None, None
-            if action == 'in':
-                r = Attendance(employee_id=e.id, work_date=day, in_at=stamp, in_lat=lat, in_lng=lng,
-                               in_accuracy=accuracy, in_photo=photo, in_distance=distance)
-                db.add(r)
-            else:
-                r = open_record
-                r.out_at, r.out_lat, r.out_lng, r.out_accuracy = stamp, lat, lng, accuracy
-                r.out_photo, r.out_distance = photo, distance
-            db.flush()
-            result = record(r, e)
-    except Exception:
-        remove_photo(photo)
-        raise
+            r = open_record
+            r.out_at, r.out_lat, r.out_lng, r.out_accuracy = stamp, lat, lng, accuracy
+            r.out_photo, r.out_distance = '', 0.0
+        db.flush()
+        result = record(r, e)
+        db.add(AuditLog(admin_id=None, action='attendance_'+action, target=e.code,
+                        detail=json.dumps({'date':day,'gps_accuracy':accuracy}), created_at=now()))
     return result, 201
 
 
