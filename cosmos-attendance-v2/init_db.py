@@ -1,20 +1,25 @@
 import os
+import re
 from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 from app import Base, engine, DB, Employee
 
 def initialise():
     Base.metadata.create_all(engine)
+    admin_code = os.getenv('ADMIN_USERNAME', 'admin').lower().strip()
+    admin_pin = os.getenv('ADMIN_PIN', '').strip()
+    if not re.fullmatch(r'\d{4}', admin_pin):
+        raise RuntimeError('Set ADMIN_PIN to exactly 4 digits.')
     with DB.begin() as db:
-        if db.scalar(select(Employee).where(Employee.admin == True)):
+        admin = db.scalar(select(Employee).where(Employee.admin == True))
+        if admin:
+            admin.code = admin_code
+            admin.password = generate_password_hash(admin_pin)
+            admin.active = True
             return
-        password = os.getenv('ADMIN_PASSWORD', '')
-        if len(password) < 12:
-            if os.getenv('APP_ENV', 'production') == 'production':
-                raise RuntimeError('Set ADMIN_PASSWORD to a unique password of at least 12 characters.')
-            password = 'JpuHr3EGnh3lpEvDtYFULdv7dh6rAmeE'
-        db.add(Employee(code=os.getenv('ADMIN_USERNAME', 'admin').lower().strip(), name='Cosmos Admin',
-                        department='Administration', admin=True, password=generate_password_hash(password)))
+        db.add(Employee(code=admin_code, name='Cosmos Admin',
+                        department='Administration', admin=True,
+                        password=generate_password_hash(admin_pin)))
 
 if __name__ == '__main__':
     initialise()
