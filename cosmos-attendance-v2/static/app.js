@@ -44,8 +44,8 @@ async function refreshOverview() {
 }
 async function refreshEmployees() {
   team = await api('/api/employees');
-  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee, then register their face.</div>'; return; }
-  $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Face</th><th>Biometric</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td><span class="pill ${e.enrolled ? '' : 'warning'}">${e.enrolled ? 'Registered' : 'Not registered'}</span></td><td><span class="pill ${e.biometric_registered ? '' : 'warning'}">${e.biometric_registered ? 'Registered' : 'Not registered'}</span></td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-edit="${e.id}">Edit</button>${e.active ? `<button class="small-button" data-enrol="${e.id}">${e.enrolled ? 'Re-register face' : 'Register face'}</button>` : ''}${e.enrolled ? `<button class="small-button" data-resetface="${e.id}">Remove face</button>` : ''}<button class="small-button" data-pin="${e.id}">Reset PIN</button>${e.biometric_registered ? `<button class="small-button" data-resetbio="${e.id}">Reset biometric</button>` : ''}<button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee and assign a secure 4-digit PIN.</div>'; return; }
+  $('employee-table').innerHTML = \`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Biometric</th><th>Access</th><th>Actions</th></tr></thead><tbody>\${team.map(e => \`<tr><td>\${personCell(e.name,e.code)}</td><td>\${escapeHTML(e.department)}</td><td><span class="pill \${e.biometric_registered ? '' : 'warning'}">\${e.biometric_registered ? 'Registered' : 'Optional'}</span></td><td>\${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-edit="\${e.id}">Edit</button><button class="small-button" data-pin="\${e.id}">Reset PIN</button>\${e.biometric_registered ? \`<button class="small-button" data-resetbio="\${e.id}">Reset biometric</button>\` : ''}<button class="small-button" data-toggle="\${e.id}">\${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="\${e.id}">Remove</button></div></td></tr>\`).join('')}</tbody></table></div>\`;
 }
 async function refreshMine() {
   const identity = await api('/api/session');
@@ -55,9 +55,9 @@ async function refreshMine() {
   openShift = status.open_shift;
   $('greeting').textContent = 'Hello, ' + user.name.split(' ')[0] + '.';
   const finished = rows.some(r => r.check_out);
-  $('employee-status').textContent = !user.enrolled ? 'Your administrator needs to register your face first.' : openShift ? 'Checked in at ' + time(openShift.check_in) + ' · ' + openShift.date : finished ? 'Your attendance is complete for today.' : 'Ready for a new working day.';
-  $('start-attendance').textContent = openShift ? 'Check out with face verification' : 'Check in with face verification';
-  $('start-attendance').disabled = !user.enrolled || (!openShift && finished);
+  $('employee-status').textContent = openShift ? 'Checked in at ' + time(openShift.check_in) + ' · ' + openShift.date : finished ? 'Your attendance is complete for today.' : 'Ready for a new working day.';
+  $('start-attendance').textContent = openShift ? 'Check out with GPS' : 'Check in with GPS';
+  $('start-attendance').disabled = !openShift && finished;
   attendanceTable('my-table', rows);
 }
 
@@ -338,7 +338,18 @@ async function startCamera(mode){
     $('camera-status').textContent='Camera ready. Keep your face inside the guide.';$('capture-button').textContent=mode.employee?'Capture and register':'Capture and verify';$('capture-button').disabled=false;
   }catch(e){$('camera-status').textContent=e.name==='NotAllowedError'?'Camera permission denied. Allow camera access in your browser settings.':e.message;stopCamera();}
 }
-$('start-attendance').addEventListener('click',()=>perform(async()=>{await refreshMine();if(!$('start-attendance').disabled)await startCamera({action:openShift?'out':'in'});}));
+$('start-attendance').addEventListener('click',()=>perform(async()=>{
+  await refreshMine();
+  if($('start-attendance').disabled)return;
+  const action=openShift?'out':'in', button=$('start-attendance');
+  button.disabled=true;
+  try{
+    const location=await getLocation();
+    await api('/api/attendance','POST',{location,action});
+    await refreshMine();
+    notice(action==='in'?'Checked in successfully.':'Checked out successfully.');
+  }finally{button.disabled=false;}
+}));
 function getLocation(){return new Promise((resolve,reject)=>{
   if(!navigator.geolocation)return reject(new Error('Location is not supported by this browser.'));
   navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,timestamp:p.timestamp}),()=>reject(new Error('Unable to get location. Allow location access, enable GPS, and try again.')),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
