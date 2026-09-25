@@ -118,6 +118,68 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class EmployeeProfile(Base):
+    __tablename__ = 'employee_profiles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), unique=True, index=True)
+    designation: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    joining_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    supervisor_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    skills: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class WorkReport(Base):
+    __tablename__ = 'work_reports'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    work_date: Mapped[str] = mapped_column(String(10), index=True)
+    job_no: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    customer: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    work_details: Mapped[str] = mapped_column(Text)
+    machine: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Completed')
+    problems: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supervisor_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class WorkIssue(Base):
+    __tablename__ = 'work_issues'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    work_date: Mapped[str] = mapped_column(String(10), index=True)
+    category: Mapped[str] = mapped_column(String(40))
+    title: Mapped[str] = mapped_column(String(160))
+    detail: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default='Open')
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Meeting(Base):
+    __tablename__ = 'meetings'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meeting_date: Mapped[str] = mapped_column(String(10), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MeetingAction(Base):
+    __tablename__ = 'meeting_actions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey('meetings.id'), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    action: Mapped[str] = mapped_column(Text)
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Open')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 app = Flask(__name__)
 app.config.update(SECRET_KEY=SECRET, MAX_CONTENT_LENGTH=3 * 1024 * 1024,
                   SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=PRODUCTION,
@@ -747,6 +809,227 @@ def audit():
     with DB() as db:
         rows=db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(250)).all()
         return jsonify([dict(id=x.id,action=x.action,target=x.target,detail=x.detail,created_at=aware(x.created_at).isoformat()) for x in rows])
+
+
+def valid_iso_date(value, field='date'):
+    try:
+        datetime.strptime(str(value), '%Y-%m-%d')
+        return str(value)
+    except (ValueError, TypeError):
+        abort(400, f'Choose a valid {field}.')
+
+
+def visible_employee_id(data):
+    if request.employee.admin and data.get('employee_id') is not None:
+        try:
+            employee_id = int(data['employee_id'])
+        except (TypeError, ValueError):
+            abort(400, 'Choose a valid employee.')
+        with DB() as db:
+            if not db.get(Employee, employee_id):
+                abort(404, 'Employee not found.')
+        return employee_id
+    return request.employee.id
+
+
+def work_report_json(r, e):
+    return dict(id=r.id, employee_id=e.id, employee=e.name, code=e.code, department=e.department,
+                date=r.work_date, job_no=r.job_no, customer=r.customer, work_details=r.work_details,
+                machine=r.machine, status=r.status, problems=r.problems, supervisor_note=r.supervisor_note,
+                verified_by=r.verified_by, created_at=aware(r.created_at).isoformat())
+
+
+def issue_json(r, e):
+    return dict(id=r.id, employee_id=e.id, employee=e.name, code=e.code, department=e.department,
+                date=r.work_date, category=r.category, title=r.title, detail=r.detail, status=r.status,
+                resolution=r.resolution, assigned_to=r.assigned_to, created_at=aware(r.created_at).isoformat())
+
+
+@app.get('/api/ecosystem/summary')
+@login_required()
+def ecosystem_summary():
+    with DB() as db:
+        work_q = select(WorkReport)
+        issue_q = select(WorkIssue)
+        action_q = select(MeetingAction)
+        if not request.employee.admin:
+            work_q = work_q.where(WorkReport.employee_id == request.employee.id)
+            issue_q = issue_q.where(WorkIssue.employee_id == request.employee.id)
+            action_q = action_q.where(MeetingAction.employee_id == request.employee.id)
+        work = db.scalars(work_q).all()
+        issues = db.scalars(issue_q).all()
+        actions = db.scalars(action_q).all()
+        return dict(
+            work_reports=len(work),
+            completed_work=sum(1 for x in work if x.status.lower() == 'completed'),
+            open_issues=sum(1 for x in issues if x.status.lower() not in ('resolved','closed')),
+            open_meeting_actions=sum(1 for x in actions if x.status.lower() not in ('completed','closed')),
+        )
+
+
+@app.get('/api/work-reports')
+@login_required()
+def list_work_reports():
+    with DB() as db:
+        q = select(WorkReport, Employee).join(Employee, Employee.id == WorkReport.employee_id)
+        if not request.employee.admin:
+            q = q.where(WorkReport.employee_id == request.employee.id)
+        rows = db.execute(q.order_by(WorkReport.work_date.desc(), WorkReport.id.desc()).limit(250)).all()
+        return jsonify([work_report_json(r, e) for r, e in rows])
+
+
+@app.post('/api/work-reports')
+@login_required()
+def create_work_report():
+    data = request.get_json() or {}
+    employee_id = visible_employee_id(data)
+    work_date = valid_iso_date(data.get('date') or now().astimezone(LOCAL).date().isoformat(), 'work date')
+    details = str(data.get('work_details','')).strip()
+    if not details:
+        abort(400, 'Work details are required.')
+    status = str(data.get('status','Completed')).strip()[:30] or 'Completed'
+    with DB.begin() as db:
+        r = WorkReport(employee_id=employee_id, work_date=work_date,
+                       job_no=str(data.get('job_no','')).strip()[:60] or None,
+                       customer=str(data.get('customer','')).strip()[:120] or None,
+                       work_details=details[:5000],
+                       machine=str(data.get('machine','')).strip()[:120] or None,
+                       status=status,
+                       problems=str(data.get('problems','')).strip()[:5000] or None,
+                       created_at=now())
+        db.add(r); db.flush()
+        e = db.get(Employee, employee_id)
+        db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,
+                       action='create_work_report', target=f'{e.code}:{r.id}', detail=r.job_no, created_at=now()))
+        return work_report_json(r, e), 201
+
+
+@app.patch('/api/work-reports/<int:report_id>')
+@login_required(admin=True)
+def update_work_report(report_id):
+    data = request.get_json() or {}
+    with DB.begin() as db:
+        r = db.get(WorkReport, report_id)
+        if not r: abort(404)
+        if 'status' in data: r.status = str(data['status']).strip()[:30] or r.status
+        if 'supervisor_note' in data: r.supervisor_note = str(data['supervisor_note']).strip()[:5000] or None
+        if data.get('verify') is True: r.verified_by = request.employee.id
+        e = db.get(Employee, r.employee_id)
+        db.add(AuditLog(admin_id=request.employee.id, action='review_work_report',
+                       target=f'{e.code}:{r.id}', detail=json.dumps({'status':r.status,'verified':bool(r.verified_by)}), created_at=now()))
+        return work_report_json(r, e)
+
+
+@app.get('/api/issues')
+@login_required()
+def list_issues():
+    with DB() as db:
+        q = select(WorkIssue, Employee).join(Employee, Employee.id == WorkIssue.employee_id)
+        if not request.employee.admin:
+            q = q.where(WorkIssue.employee_id == request.employee.id)
+        rows = db.execute(q.order_by(WorkIssue.work_date.desc(), WorkIssue.id.desc()).limit(250)).all()
+        return jsonify([issue_json(r, e) for r, e in rows])
+
+
+@app.post('/api/issues')
+@login_required()
+def create_issue():
+    data = request.get_json() or {}
+    employee_id = visible_employee_id(data)
+    title = str(data.get('title','')).strip()
+    detail = str(data.get('detail','')).strip()
+    if not title or not detail:
+        abort(400, 'Issue title and details are required.')
+    category = str(data.get('category','Other')).strip()[:40] or 'Other'
+    work_date = valid_iso_date(data.get('date') or now().astimezone(LOCAL).date().isoformat(), 'issue date')
+    with DB.begin() as db:
+        r = WorkIssue(employee_id=employee_id, work_date=work_date, category=category,
+                      title=title[:160], detail=detail[:5000], status='Open', created_at=now())
+        db.add(r); db.flush()
+        e = db.get(Employee, employee_id)
+        db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,
+                       action='create_work_issue', target=f'{e.code}:{r.id}', detail=category, created_at=now()))
+        return issue_json(r, e), 201
+
+
+@app.patch('/api/issues/<int:issue_id>')
+@login_required(admin=True)
+def update_issue(issue_id):
+    data = request.get_json() or {}
+    with DB.begin() as db:
+        r = db.get(WorkIssue, issue_id)
+        if not r: abort(404)
+        if 'status' in data: r.status = str(data['status']).strip()[:30] or r.status
+        if 'resolution' in data: r.resolution = str(data['resolution']).strip()[:5000] or None
+        if 'assigned_to' in data:
+            r.assigned_to = int(data['assigned_to']) if data['assigned_to'] not in (None,'') else None
+        e = db.get(Employee, r.employee_id)
+        db.add(AuditLog(admin_id=request.employee.id, action='update_work_issue',
+                       target=f'{e.code}:{r.id}', detail=r.status, created_at=now()))
+        return issue_json(r, e)
+
+
+@app.get('/api/meetings')
+@login_required()
+def list_meetings():
+    with DB() as db:
+        if request.employee.admin:
+            meetings = db.scalars(select(Meeting).order_by(Meeting.meeting_date.desc(), Meeting.id.desc()).limit(100)).all()
+        else:
+            meeting_ids = select(MeetingAction.meeting_id).where(MeetingAction.employee_id == request.employee.id)
+            meetings = db.scalars(select(Meeting).where(Meeting.id.in_(meeting_ids)).order_by(Meeting.meeting_date.desc()).limit(100)).all()
+        out=[]
+        for m in meetings:
+            actions_q=select(MeetingAction, Employee).join(Employee, Employee.id==MeetingAction.employee_id).where(MeetingAction.meeting_id==m.id)
+            if not request.employee.admin:
+                actions_q=actions_q.where(MeetingAction.employee_id==request.employee.id)
+            actions=db.execute(actions_q.order_by(MeetingAction.id)).all()
+            out.append(dict(id=m.id,date=m.meeting_date,title=m.title,notes=m.notes,created_by=m.created_by,
+                            actions=[dict(id=a.id,employee_id=e.id,employee=e.name,code=e.code,action=a.action,
+                                          due_date=a.due_date,status=a.status) for a,e in actions]))
+        return jsonify(out)
+
+
+@app.post('/api/meetings')
+@login_required(admin=True)
+def create_meeting():
+    data = request.get_json() or {}
+    title = str(data.get('title','')).strip()
+    if not title: abort(400, 'Meeting title is required.')
+    meeting_date = valid_iso_date(data.get('date') or now().astimezone(LOCAL).date().isoformat(), 'meeting date')
+    actions = data.get('actions') or []
+    with DB.begin() as db:
+        m=Meeting(meeting_date=meeting_date,title=title[:160],notes=str(data.get('notes','')).strip()[:8000] or None,
+                  created_by=request.employee.id,created_at=now())
+        db.add(m); db.flush()
+        for item in actions[:50]:
+            try: employee_id=int(item.get('employee_id'))
+            except (TypeError,ValueError): abort(400,'Each meeting action needs an employee.')
+            if not db.get(Employee, employee_id): abort(404,'Employee for meeting action not found.')
+            action=str(item.get('action','')).strip()
+            if not action: abort(400,'Meeting action cannot be blank.')
+            due=item.get('due_date')
+            due=valid_iso_date(due,'due date') if due else None
+            db.add(MeetingAction(meeting_id=m.id,employee_id=employee_id,action=action[:5000],due_date=due,status='Open',created_at=now()))
+        db.add(AuditLog(admin_id=request.employee.id,action='create_meeting',target=f'meeting:{m.id}',detail=m.title,created_at=now()))
+        return {'id':m.id,'ok':True},201
+
+
+@app.patch('/api/meeting-actions/<int:action_id>')
+@login_required()
+def update_meeting_action(action_id):
+    data=request.get_json() or {}
+    with DB.begin() as db:
+        a=db.get(MeetingAction,action_id)
+        if not a: abort(404)
+        if not request.employee.admin and a.employee_id!=request.employee.id: abort(403)
+        status=str(data.get('status','')).strip()[:30]
+        if status not in ('Open','In Progress','Completed','Closed'):
+            abort(400,'Choose a valid action status.')
+        a.status=status
+        db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,
+                       action='update_meeting_action',target=f'action:{a.id}',detail=status,created_at=now()))
+        return {'id':a.id,'status':a.status}
 
 
 @app.get('/api/export')
