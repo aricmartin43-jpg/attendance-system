@@ -1193,7 +1193,12 @@ def work_order_json(db, w):
 @login_required()
 def list_customers():
     with DB() as db:
-        rows=db.scalars(select(Customer).order_by(Customer.name)).all()
+        q=select(Customer).order_by(Customer.name)
+        if not request.employee.admin:
+            assigned_orders=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            customer_ids=select(WorkOrder.customer_id).where(WorkOrder.id.in_(assigned_orders))
+            q=q.where(Customer.id.in_(customer_ids))
+        rows=db.scalars(q).all()
         out=[]
         for c in rows:
             machines=db.scalars(select(CustomerMachine).where(CustomerMachine.customer_id==c.id)).all()
@@ -1229,6 +1234,10 @@ def customer_detail(customer_id):
     with DB() as db:
         c=db.get(Customer,customer_id)
         if not c: abort(404,'Customer not found.')
+        if not request.employee.admin:
+            allowed=db.scalar(select(WorkOrderAssignment.id).join(WorkOrder,WorkOrder.id==WorkOrderAssignment.work_order_id)
+                              .where(WorkOrderAssignment.employee_id==request.employee.id,WorkOrder.customer_id==customer_id).limit(1))
+            if not allowed: abort(403,'This customer is not linked to your assigned work.')
         contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id)
                            .order_by(CustomerContact.primary_contact.desc(),CustomerContact.name)).all()
         sites=db.scalars(select(CustomerSite).where(CustomerSite.customer_id==c.id).order_by(CustomerSite.name)).all()
@@ -1306,6 +1315,10 @@ def list_machines():
     customer_id=request.args.get('customer_id')
     with DB() as db:
         q=select(CustomerMachine).order_by(CustomerMachine.id.desc())
+        if not request.employee.admin:
+            assigned_orders=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            machine_ids=select(WorkOrder.machine_id).where(WorkOrder.id.in_(assigned_orders),WorkOrder.machine_id != None)
+            q=q.where(CustomerMachine.id.in_(machine_ids))
         if customer_id:
             try:q=q.where(CustomerMachine.customer_id==int(customer_id))
             except ValueError:abort(400,'Choose a valid customer.')
@@ -1359,6 +1372,10 @@ def machine_history(machine_id):
     with DB() as db:
         m=db.get(CustomerMachine,machine_id)
         if not m: abort(404,'Machine not found.')
+        if not request.employee.admin:
+            allowed=db.scalar(select(WorkOrderAssignment.id).join(WorkOrder,WorkOrder.id==WorkOrderAssignment.work_order_id)
+                              .where(WorkOrderAssignment.employee_id==request.employee.id,WorkOrder.machine_id==machine_id).limit(1))
+            if not allowed: abort(403,'This machine is not linked to your assigned work.')
         customer=db.get(Customer,m.customer_id)
         jobs=db.scalars(select(WorkOrder).where(WorkOrder.machine_id==m.id).order_by(WorkOrder.id.desc())).all()
         links=db.scalars(select(WorkReportLink).where(WorkReportLink.machine_id==m.id).order_by(WorkReportLink.id.desc())).all()
@@ -1458,7 +1475,7 @@ def update_work_order(work_order_id):
 
 
 @app.get('/api/network/search')
-@login_required()
+@login_required(admin=True)
 def network_search():
     q=str(request.args.get('q','')).strip()
     if len(q)<2:return jsonify([])
