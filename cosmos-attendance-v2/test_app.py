@@ -16,6 +16,7 @@ os.environ['DATABASE_URL'] = 'sqlite:///' + tempfile.mktemp(suffix='.db')
 os.environ['SECRET_KEY'] = 'test-secret-' * 8
 os.environ['FACE_ENCRYPTION_KEY'] = Fernet.generate_key().decode()
 os.environ['ADMIN_PASSWORD'] = 'testing-admin-password'
+os.environ['ADMIN_PIN'] = '9876'
 import app as module
 from init_db import initialise
 
@@ -31,7 +32,7 @@ def database(monkeypatch):
     monkeypatch.setattr(module, 'remove_photo', lambda value: None)
 
 
-def client(code='admin', password='testing-admin-password'):
+def client(code='admin', password='9876'):
     c = module.app.test_client()
     token = c.get('/api/session').json['csrf']
     response = c.post('/api/login', json=dict(code=code, password=password), headers={'X-CSRF-Token':token})
@@ -67,6 +68,28 @@ def test_authentication_csrf_and_roles():
     assert worker.get('/api/employees').status_code == 403
     assert worker.get('/api/export?month=2026-09').status_code == 403
     assert post(worker, f'/api/employees/{eid}/enrol', dict(photo='fake',consent=True)).status_code == 403
+
+
+def test_customer_and_contact_edits_preserve_history_and_permissions():
+    admin = client()
+    created_worker = post(admin, '/api/employees', dict(code='ces001', name='Worker', department='Production', pin='1234'))
+    assert created_worker.status_code == 201
+    worker = client('ces001', '1234')
+    created = post(admin, '/api/customers', {'name':'Original Co'}).json
+    cid = created['id']
+    contact = post(admin, f'/api/customers/{cid}/contacts', {'name':'Original Person'}).json['id']
+    patch = lambda c,path,data: c.patch(path,json=data,headers={'X-CSRF-Token':c.csrf})
+    assert patch(worker,f'/api/customers/{cid}',{'name':'Intruder'}).status_code == 403
+    assert patch(admin,f'/api/customers/{cid}',{'name':'','status':'Archived'}).status_code == 400
+    assert patch(admin,f'/api/customers/{cid}',{'name':'Updated Co','status':'Archived'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact}',{'name':'Updated Person'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact+999}',{'name':'Wrong'}).status_code == 404
+    detail = admin.get(f'/api/customers/{cid}').json
+    assert detail['name']=='Updated Co' and detail['status']=='Archived'
+    assert detail['contacts'][0]['name']=='Updated Person'
+    with module.DB() as db:
+        actions=[row.action for row in db.scalars(module.select(module.AuditLog)).all()]
+    assert 'update_customer' in actions and 'update_customer_contact' in actions
 
 
 def test_shift_rules_and_record_isolation():

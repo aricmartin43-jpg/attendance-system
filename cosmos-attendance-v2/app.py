@@ -1077,6 +1077,61 @@ def create_customer():
         return customer_json(c),201
 
 
+@app.patch('/api/customers/<int:customer_id>')
+@login_required(admin=True)
+def update_customer(customer_id):
+    data=request.get_json(silent=True) or {}
+    allowed={'name':180,'gstin':30,'industry':100,'phone':40,'email':160,'address':5000,'notes':5000}
+    if not any(k in data for k in (*allowed,'status')): abort(400,'No changes supplied.')
+    with DB.begin() as db:
+        c=db.get(Customer,customer_id)
+        if not c: abort(404,'Customer not found.')
+        changes={}
+        for key,limit in allowed.items():
+            if key in data:
+                value=str(data[key] or '').strip()[:limit] or None
+                if key=='name' and not value: abort(400,'Company name is required.')
+                if getattr(c,key)!=value:
+                    changes[key]={'from':getattr(c,key),'to':value}
+                    setattr(c,key,value)
+        if 'status' in data:
+            if data['status'] not in ('Active','Archived'): abort(400,'Invalid customer status.')
+            if c.status!=data['status']:
+                changes['status']={'from':c.status,'to':data['status']}
+                c.status=data['status']
+        if changes:
+            db.add(AuditLog(admin_id=request.employee.id,action='update_customer',target=c.code or str(c.id),
+                            detail=json.dumps(changes),created_at=now()))
+        return customer_json(c)
+
+
+@app.patch('/api/customers/<int:customer_id>/contacts/<int:contact_id>')
+@login_required(admin=True)
+def update_customer_contact(customer_id,contact_id):
+    data=request.get_json(silent=True) or {}
+    allowed={'name':120,'designation':120,'department':100,'phone':40,'email':160,'notes':5000}
+    with DB.begin() as db:
+        c=db.get(CustomerContact,contact_id)
+        if not c or c.customer_id!=customer_id: abort(404,'Contact not found.')
+        changes={}
+        for key,limit in allowed.items():
+            if key in data:
+                value=str(data[key] or '').strip()[:limit] or None
+                if key=='name' and not value: abort(400,'Contact name is required.')
+                if getattr(c,key)!=value:
+                    changes[key]={'from':getattr(c,key),'to':value}
+                    setattr(c,key,value)
+        if 'primary_contact' in data:
+            value=data['primary_contact'] is True
+            if c.primary_contact!=value:
+                changes['primary_contact']={'from':c.primary_contact,'to':value}
+                c.primary_contact=value
+        if changes:
+            db.add(AuditLog(admin_id=request.employee.id,action='update_customer_contact',
+                            target=f'contact:{c.id}',detail=json.dumps(changes),created_at=now()))
+        return {'id':c.id,'ok':True}
+
+
 @app.get('/api/customers/<int:customer_id>')
 @login_required()
 def customer_detail(customer_id):
