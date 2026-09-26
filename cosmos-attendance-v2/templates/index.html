@@ -2,30 +2,38 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cosmos Attendance</title>
-  <meta name="description" content="Employee attendance for Cosmos Engineering Solutions.">
+  <title>Cosmos Workspace</title>
+  <meta name="description" content="The operations workspace for Cosmos Engineering Solutions.">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/workspace.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-layout">
     <aside class="brand-panel">
       <div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>ENGINEERING SOLUTIONS</small></span></div>
-      <div class="brand-story"><span class="eyebrow">PEOPLE · PRECISION · PROGRESS</span><h1>Every day.<br>Every contribution.</h1><p>Your work starts here. Secure employee access and company operations for the people who keep Cosmos moving.</p><div class="brand-rule"></div><span class="brand-caption">ATTENDANCE / EMPLOYEE PORTAL</span></div>
+      <div class="brand-story"><span class="eyebrow">THE COSMOS WORKSPACE</span><h1>Good work.<br>Built together.</h1><p>From the first enquiry to the final delivery. Your people, production and progress, connected.</p><div class="brand-rule"></div><span class="brand-caption">INNOVATE. ENGINEER. EXCEL.</span></div>
       <p class="brand-footer">Cosmos Engineering Solutions · Coimbatore</p>
     </aside>
-    <main class="login-main"><div class="login-card"><span class="eyebrow accent">COSMOS ATTENDANCE</span><h2>Welcome to work.</h2><p class="muted">Sign in to mark your attendance or manage your team.</p>
-      <form id="login-form"><label>Employee ID<input id="login-code" name="code" autocomplete="username" required placeholder="e.g. CES001"></label><label>PIN / Admin password<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required placeholder="4-digit employee PIN"></label><button type="submit" class="primary wide">Sign in with PIN <span aria-hidden="true">→</span></button></form>
-      <p class="help">Employees use their Employee ID and 4-digit PIN. Administrators use their secure admin password.</p><div class="login-note"><span class="mini-icon">◎</span><p>Employee access uses only the assigned Employee ID and 4-digit PIN.</p></div>
+    <main class="login-main"><div class="login-card"><span class="eyebrow accent">YOUR WORKDAY, CONNECTED</span><h2>Welcome back.</h2><p class="muted">Sign in to your Cosmos workspace.</p>
+      <form id="login-form"><label>Employee ID<input id="login-code" name="code" autocomplete="username" required placeholder="e.g. CES001"></label><label>4-digit PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="current-password" required placeholder="Enter your PIN"></label><button type="submit" class="primary wide">Open workspace <span aria-hidden="true">→</span></button></form>
+      <p class="help">Use your assigned employee ID and 4-digit PIN.</p><div class="login-note"><span class="mini-icon">◎</span><p>Need help signing in? Contact your administrator.</p></div>
     </div></main>
   </div>
 
   <div id="app-view" class="app-layout" hidden>
-    <aside class="sidebar"><div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>ATTENDANCE</small></span></div><span class="nav-label">WORKSPACE</span><nav id="navigation" aria-label="Main navigation"></nav><div class="sidebar-bottom"><div class="workspace-badge">CE</div><div>Cosmos Engineering<small>Solutions · Coimbatore</small></div></div></aside>
-    <div class="workspace"><header class="topbar"><span id="breadcrumb">Attendance</span><div class="account"><span id="account-name"></span><button class="text-button" id="logout">Sign out</button></div></header>
+    <aside class="sidebar" id="workspace-sidebar"><div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>OPERATIONS WORKSPACE</small></span><button id="close-navigation" class="icon-button mobile-only" aria-label="Close navigation">×</button></div><label class="nav-search"><span class="sr-only">Find a module</span><input id="module-search" type="search" placeholder="Find a module…" autocomplete="off"></label><nav id="navigation" aria-label="Main navigation"></nav><p id="nav-no-results" class="muted" hidden>No matching modules</p><div class="sidebar-bottom"><div class="workspace-badge">CE</div><div>Cosmos Engineering<small>Coimbatore · India</small></div></div></aside>
+    <button id="navigation-backdrop" aria-label="Close navigation" hidden></button>
+    <div class="workspace"><header class="topbar"><div class="topbar-location"><button id="open-navigation" class="icon-button mobile-only" aria-label="Open navigation" aria-controls="workspace-sidebar" aria-expanded="false">☰</button><span class="topbar-company">Workspace</span><span class="breadcrumb-divider">/</span><span id="breadcrumb">Overview</span></div><div class="account"><span class="account-avatar" id="account-avatar" aria-hidden="true">C</span><span id="account-name"></span><button class="text-button" id="logout">Sign out</button></div></header>
     <main class="content">
       <div class="page-heading"><div><span class="eyebrow accent">COSMOS ENGINEERING SOLUTIONS</span><h1 id="page-title">Attendance overview</h1><p id="page-subtitle" class="muted">A clear view of your team's working day.</p></div><div class="date-badge" id="today-label"></div></div>
+      <section id="home-panel" class="panel-view" hidden>
+        <div class="home-intro"><div><span class="eyebrow">TODAY AT COSMOS</span><h2>Keep the work moving.</h2><p>See what needs attention and take the next step.</p></div><div class="home-actions"><button class="primary" data-home-action="quote">+ New quotation</button><button class="secondary" data-home-action="job">+ Work order</button></div></div>
+        <div id="home-metrics" class="stats"></div>
+        <div class="home-grid"><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRIORITIES</span><h2>Needs your attention</h2></div><span class="subtle-tag">Live records</span></div><div id="home-attention"></div></article><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">QUOTE TO DELIVERY</span><h2>Work in progress</h2></div></div><div id="home-flow"></div><p class="card-footnote">Counts represent records at each stage, not a single conversion funnel.</p></article></div>
+        <article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRODUCTION</span><h2>Upcoming work orders</h2></div><button class="text-button" data-jump="jobs">View all work orders →</button></div><div id="home-jobs"></div></article>
+      </section>
 
       <section id="overview-panel" class="panel-view" hidden>
         <div class="stats"><article class="stat"><span>Active employees</span><strong id="stat-total">0</strong><small>Registered team members</small></article><article class="stat"><span>Checked in</span><strong id="stat-in">0</strong><small>Attendance recorded today</small></article><article class="stat"><span>At work</span><strong id="stat-working">0</strong><small>Open shifts from today</small></article><article class="stat"><span>Not checked in</span><strong id="stat-away">0</strong><small>Active team, no check-in today</small></article></div>
@@ -98,7 +106,7 @@
       <section id="meetings-panel" class="panel-view" hidden>
         <div class="section-card"><div class="section-heading"><div><h2>Meetings & actions</h2><p class="muted">Decisions and assigned actions stay linked to responsible employees.</p></div><button class="primary" id="add-meeting">+ Create meeting</button></div><div id="meetings-list"></div></div>
       </section>
-    </main><footer class="app-footer">COSMOS ATTENDANCE <span>Company time zone: <span id="timezone-label">Asia/Kolkata</span></span></footer></div>
+    </main><footer class="app-footer">COSMOS WORKSPACE <span>Company time zone: <span id="timezone-label">Asia/Kolkata</span></span></footer></div>
   </div>
 
   <dialog id="employee-dialog"><form id="employee-form"><input type="hidden" name="employee_id" id="employee-id"><div class="dialog-header"><h2 id="employee-dialog-title">Add employee</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="employee-dialog-note">Create an employee with a private 4-digit PIN.</p><label>Full name<input name="name" required maxlength="100" autocomplete="name"></label><label>Employee ID<input name="code" required maxlength="40" pattern="[a-zA-Z0-9_-]+" placeholder="CES001"></label><label>Department<select name="department"><option>Production</option><option>Laser</option><option>Service</option><option>Design</option><option>Administration</option><option>Other</option></select></label><label id="pin-label">Initial 4-digit PIN<input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password"></label><p class="help" id="pin-help">Use exactly 4 digits. The employee can later add phone biometric login.</p><button class="primary wide" id="employee-save" type="submit">Create employee</button></form></dialog>

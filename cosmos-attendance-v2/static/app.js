@@ -221,7 +221,32 @@ async function refreshJobFiles(){
 function documentLinks(rows){return rows.map(d=>`<p><a href="/api/documents/download/${d.id}">${escapeHTML(d.filename)}</a> · ${escapeHTML(new Date(d.uploaded_at).toLocaleDateString('en-IN'))}</p>`).join('')||'<p class="muted">No documents uploaded.</p>';}
 async function loadEmployeeDocuments(id){$('employee-documents').innerHTML='<h3>Private documents</h3>'+documentLinks(await api('/api/documents/employee/'+id));}
 
+function moduleIcon(view){
+  const paths={home:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',customers:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8 M17 4a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9',quotations:'M6 3h12v18l-3-2-3 2-3-2-3 2z M9 7h6 M9 11h6 M9 15h3',jobs:'M3 7h18v14H3z M8 7V3h8v4 M3 12h18 M10 12v3h4v-3',inventory:'M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10 M8 5l9 4',production:'M3 21V9l6 4V7l6 5V3h5v18z M7 17h1 M12 17h1 M17 17h1',maintenance:'M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4z',analytics:'M4 3v18h17 M8 16v-4 M13 16V8 M18 16V5',overview:'M4 5h16v16H4z M8 3v4 M16 3v4 M4 11h16 M8 15h3',issues:'M12 3L2 21h20z M12 9v5 M12 17v1',meetings:'M3 4h18v13H8l-5 4z M7 8h10 M7 12h6'};
+  const path=paths[view]||paths[{employees:'customers',purchasing:'inventory',machines:'maintenance',checkin:'overview'}[view]]||'M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
+}
+function closeNavigation(){document.body.classList.remove('navigation-open');$('navigation-backdrop').hidden=true;$('open-navigation').setAttribute('aria-expanded','false');}
+async function refreshHome(){
+  $('home-metrics').innerHTML='<p class="muted">Loading your workspace…</p>';
+  const [summary,orders,quotes,stock,purchases]=await Promise.all([api('/api/management-summary'),api('/api/work-orders'),api('/api/quotations'),api('/api/stock-items'),api('/api/purchase-orders')]);
+  const activeOrders=orders.filter(j=>!['Completed','Closed','Cancelled'].includes(j.status));
+  const followUps=quotes.filter(q=>!['Accepted','Lost'].includes(q.status)&&q.follow_up_date&&q.follow_up_date<=today);
+  const shortages=stock.filter(s=>s.active&&Number(s.available??s.quantity)<=Number(s.reorder_level));
+  const pendingQuotes=quotes.filter(q=>!['Accepted','Lost'].includes(q.status));
+  const pendingPurchases=purchases.filter(p=>!['Received','Cancelled'].includes(p.status));
+  const metrics=[['Open work orders',summary.open_jobs,'Across production & service','jobs'],['Overdue jobs',summary.overdue_jobs,'Past their promised date','jobs'],['Low stock items',shortages.length,'Available stock at reorder level','inventory'],['Open maintenance',summary.open_maintenance,'Service tasks awaiting completion','maintenance']];
+  $('home-metrics').innerHTML=metrics.map(([label,value,note,view],i)=>`<button class="stat metric-card" data-home-view="${view}"><span class="metric-top">${label}<span class="metric-icon">${moduleIcon(view)}</span></span><strong>${escapeHTML(value)}</strong><small>${note} <span aria-hidden="true">↗</span></small></button>`).join('');
+  const attention=[['Overdue work orders',summary.overdue_jobs,'Review delivery dates and blockers','jobs'],['Quotation follow-ups',followUps.length,'Enquiries with a follow-up due today or earlier','quotations'],['Material shortages',shortages.length,'Review reservations and purchasing','inventory'],['Blocked operations',summary.blocked_steps,'Resolve delays on the production floor','production']];
+  $('home-attention').innerHTML=attention.map(([label,count,note,view])=>`<button class="attention-row" data-home-view="${view}"><span class="attention-number ${count?'needs-action':''}">${escapeHTML(count)}</span><span><strong>${label}</strong><small>${note}</small></span><span class="row-arrow">↗</span></button>`).join('');
+  const stages=[['01','Quotations',pendingQuotes.length,'quotations'],['02','Open work orders',summary.open_jobs,'jobs'],['03','Awaiting materials',pendingPurchases.length,'purchasing']];
+  $('home-flow').innerHTML=stages.map(([n,label,count,view])=>`<button class="flow-row" data-home-view="${view}"><span class="flow-index">${n}</span><span>${label}${view==='purchasing'?'<small>Outstanding purchase orders</small>':''}</span><strong>${escapeHTML(count)}</strong></button>`).join('');
+  const upcoming=activeOrders.sort((a,b)=>(a.target_date||'9999').localeCompare(b.target_date||'9999')).slice(0,5);
+  $('home-jobs').innerHTML=upcoming.length?`<div class="table-wrap"><table><thead><tr><th>Work order</th><th>Customer</th><th>Target date</th><th>Status</th><th></th></tr></thead><tbody>${upcoming.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small>${escapeHTML(j.title)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.target_date||'Not scheduled')}</td><td>${statusPill(j.status)}</td><td><button class="small-button" data-home-job="${j.id}">Open job →</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>Your next job starts here</strong>Create a work order or accept a quotation to begin.</div>';
+}
+
 const views = {
+  home:['Workspace overview','Your daily view of customers, people and production.','▦'],
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
   ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
   customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
@@ -244,9 +269,11 @@ const views = {
 async function navigate(view) {
   if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
+  closeNavigation();
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
-  document.querySelectorAll('.nav-button').forEach(el => el.classList.toggle('active',el.dataset.view===view));
+  document.querySelectorAll('.nav-button').forEach(el => {el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
   $('page-title').textContent=views[view][0]; $('page-subtitle').textContent=views[view][1]; $('breadcrumb').textContent=views[view][0];
+  if(view === 'home') await refreshHome();
   if(view === 'overview') await refreshOverview();
   if(view === 'ecosystem') await refreshEcosystem();
   if(view === 'employees') await refreshEmployees();
@@ -269,13 +296,22 @@ async function navigate(view) {
 async function showApp() {
   $('login-view').hidden = true; $('app-view').hidden = false;
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
+  $('account-avatar').textContent=user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('');
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','ecosystem','customers','quotations','jobs','job-files','production','inventory','purchasing','maintenance','analytics','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
+  const groups=user.admin?[
+    ['Workspace',['home']],['Sales & customers',['customers','quotations','machines']],
+    ['Operations',['jobs','job-files','production','inventory','purchasing','maintenance']],
+    ['People & collaboration',['overview','employees','work','issues','meetings']],
+    ['Insights',['analytics','reports','ecosystem']]
+  ]:[['My workspace',['checkin','jobs','work','issues','meetings']]];
+  const names=groups.flatMap(g=>g[1]);
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
-  $('navigation').innerHTML = names.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${views[view][2]}</span>${view==='overview'?'Overview':views[view][0]}</button>`).join('');
+  const shortNames={home:'Overview',overview:'Attendance',ecosystem:'Company memory',analytics:'Management summary'};
+  $('navigation').innerHTML=groups.map(([title,list])=>`<section class="nav-group"><h2>${title}</h2>${list.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${moduleIcon(view)}</span><span>${shortNames[view]||views[view][0]}</span></button>`).join('')}</section>`).join('');
+  $('module-search').value='';$('nav-no-results').hidden=true;
   await navigate(names[0]);
   const linkedJob=new URLSearchParams(location.search).get('job');
   if(user.admin && /^\d+$/.test(linkedJob||'')){
@@ -292,6 +328,12 @@ $('login-form').addEventListener('submit',e=>{e.preventDefault();perform(async()
 });});
 $('logout').addEventListener('click',()=>perform(async()=>{await api('/api/logout','POST',{});stopCamera();await boot();}));
 $('navigation').addEventListener('click',e=>{const button=e.target.closest('[data-view]');if(button)perform(()=>navigate(button.dataset.view));});
+$('open-navigation').addEventListener('click',()=>{document.body.classList.add('navigation-open');$('navigation-backdrop').hidden=false;$('open-navigation').setAttribute('aria-expanded','true');$('close-navigation').focus();});
+$('close-navigation').addEventListener('click',()=>{closeNavigation();$('open-navigation').focus();});
+$('navigation-backdrop').addEventListener('click',closeNavigation);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeNavigation();});
+$('module-search').addEventListener('input',e=>{const term=e.target.value.trim().toLowerCase();let matches=0;document.querySelectorAll('.nav-group').forEach(group=>{let found=0;group.querySelectorAll('.nav-button').forEach(button=>{button.hidden=!button.textContent.toLowerCase().includes(term);if(!button.hidden){found++;matches++;}});group.hidden=!found;});$('nav-no-results').hidden=matches>0;});
+$('home-panel').addEventListener('click',e=>perform(async()=>{const view=e.target.closest('[data-home-view]'),action=e.target.closest('[data-home-action]'),job=e.target.closest('[data-home-job]');if(view)return navigate(view.dataset.homeView);if(action){if(action.dataset.homeAction==='quote'){await navigate('quotations');$('add-quotation').click();}else {await navigate('jobs');await openJobDialog();}}if(job){await navigate('job-files');$('job-file-select').value=job.dataset.homeJob;await refreshJobFiles();}}));
 $('day-filter').addEventListener('change',()=>perform(refreshOverview));
 $('month-filter').addEventListener('change',()=>perform(()=>navigate('reports')));
 $('export').addEventListener('click',()=>perform(async()=>{
