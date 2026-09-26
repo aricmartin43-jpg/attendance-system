@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let csrf = '', user = null, team = [], today = '', zone = 'Asia/Kolkata', currentView = '', openShift = null;
+let csrf = '', user = null, team = [], customers = [], machines = [], jobs = [], today = '', zone = 'Asia/Kolkata', currentView = '', openShift = null;
 let stream = null, cameraMode = null, challenge = '', toastTimer, cameraRun = 0;
 const escapeHTML = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(message, error = false) {
@@ -44,8 +44,8 @@ async function refreshOverview() {
 }
 async function refreshEmployees() {
   team = await api('/api/employees');
-  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee, then register their face.</div>'; return; }
-  $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Face</th><th>Biometric</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td><span class="pill ${e.enrolled ? '' : 'warning'}">${e.enrolled ? 'Registered' : 'Not registered'}</span></td><td><span class="pill ${e.biometric_registered ? '' : 'warning'}">${e.biometric_registered ? 'Registered' : 'Not registered'}</span></td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-edit="${e.id}">Edit</button>${e.active ? `<button class="small-button" data-enrol="${e.id}">${e.enrolled ? 'Re-register face' : 'Register face'}</button>` : ''}${e.enrolled ? `<button class="small-button" data-resetface="${e.id}">Remove face</button>` : ''}<button class="small-button" data-pin="${e.id}">Reset PIN</button>${e.biometric_registered ? `<button class="small-button" data-resetbio="${e.id}">Reset biometric</button>` : ''}<button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee and assign a secure 4-digit PIN.</div>'; return; }
+  $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-file="${e.id}">File</button><button class="small-button" data-edit="${e.id}">Edit</button><button class="small-button" data-pin="${e.id}">Reset PIN</button><button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 async function refreshMine() {
   const identity = await api('/api/session');
@@ -55,51 +55,285 @@ async function refreshMine() {
   openShift = status.open_shift;
   $('greeting').textContent = 'Hello, ' + user.name.split(' ')[0] + '.';
   const finished = rows.some(r => r.check_out);
-  $('employee-status').textContent = !user.enrolled ? 'Your administrator needs to register your face first.' : openShift ? 'Checked in at ' + time(openShift.check_in) + ' · ' + openShift.date : finished ? 'Your attendance is complete for today.' : 'Ready for a new working day.';
-  $('start-attendance').textContent = openShift ? 'Check out with face verification' : 'Check in with face verification';
-  $('start-attendance').disabled = !user.enrolled || (!openShift && finished);
+  $('employee-status').textContent = openShift ? 'Checked in at ' + time(openShift.check_in) + ' · ' + openShift.date : finished ? 'Your attendance is complete for today.' : 'Ready for a new working day.';
+  $('start-attendance').textContent = openShift ? 'Check out with GPS' : 'Check in with GPS';
+  $('start-attendance').disabled = !openShift && finished;
   attendanceTable('my-table', rows);
 }
-const views = {overview:['Attendance overview',"A clear view of your team's working day.",'▦'],employees:['Employees','The people behind every working day.','⊞'],reports:['Monthly reports','Attendance records, ready for your monthly review.','▤'],checkin:['My attendance','Check in, get to work, and make today count.','◎']};
+
+
+async function ensureCustomers(){
+  if(!customers.length) customers=await api('/api/customers');
+  return customers;
+}
+function customerOptions(selected=''){
+  return customers.map(c=>`<option value="${c.id}" ${String(c.id)===String(selected)?'selected':''}>${escapeHTML(c.name)} · ${escapeHTML(c.code||'')}</option>`).join('');
+}
+async function refreshCustomers(){
+  customers=await api('/api/customers');
+  if(!customers.length){$('customer-table').innerHTML='<div class="empty"><strong>No customers yet</strong>Add your first customer to begin the company network.</div>';$('customer-detail').innerHTML='';return;}
+  $('customer-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Customer</th><th>Industry</th><th>Contacts</th><th>Machines</th><th>Open jobs</th><th>Status</th><th></th></tr></thead><tbody>${customers.map(c=>`<tr><td><strong>${escapeHTML(c.name)}</strong><small class="muted">${escapeHTML(c.code||'')} · GST ${escapeHTML(c.gstin||'—')}</small></td><td>${escapeHTML(c.industry||'—')}</td><td>${c.contact_count}</td><td>${c.machine_count}</td><td>${c.open_jobs}</td><td>${statusPill(c.status)}</td><td><button class="small-button" data-customer-open="${c.id}">Open network</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+async function showCustomerDetail(id){
+  const c=await api('/api/customers/'+id);
+  $('customer-detail').innerHTML=`<article class="section-card customer-network"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(c.code||'CUSTOMER')}</span><h2>${escapeHTML(c.name)}</h2><p class="muted">${escapeHTML(c.address||'No address recorded')}</p></div><div class="action-buttons">${user.admin?`<button class="secondary" data-edit-customer="${c.id}">Edit customer</button><button class="secondary" data-archive-customer="${c.id}">${c.status==='Archived'?'Restore':'Archive'}</button>`:''}<button class="secondary" data-add-contact="${c.id}">+ Contact</button><button class="secondary" data-add-machine-customer="${c.id}">+ Machine</button><button class="primary" data-add-job-customer="${c.id}">+ Work order</button></div></div>
+  <div class="network-columns">
+    <section><h3>Important people</h3>${c.contacts.length?c.contacts.map(x=>`<div class="network-item"><strong>${escapeHTML(x.name)}</strong><span>${escapeHTML(x.designation||x.department||'Contact')}</span><small>${escapeHTML(x.phone||'')} ${escapeHTML(x.email||'')}</small>${user.admin?`<button class="small-button" data-edit-contact="${x.id}" data-customer-id="${c.id}">Edit</button>`:''}</div>`).join(''):'<p class="muted">No contacts yet.</p>'}</section>
+    <section><h3>Machines</h3>${c.machines.length?c.machines.map(m=>`<button class="network-item network-button" data-machine-open="${m.id}"><strong>${escapeHTML(m.customer_machine_no||m.code)}</strong><span>${escapeHTML(m.machine_type||'Machine')} · ${escapeHTML(m.model||'')}</span><small>${escapeHTML(m.code||'')}</small></button>`).join(''):'<p class="muted">No machines yet.</p>'}</section>
+    <section><h3>Recent work orders</h3>${c.jobs.length?c.jobs.slice(0,8).map(j=>`<div class="network-item"><strong>${escapeHTML(j.code)} · ${escapeHTML(j.title)}</strong><span>${escapeHTML(j.machine_no||'General')} · ${escapeHTML(j.status)}</span><small>${j.assignments.map(a=>escapeHTML(a.employee)).join(', ')||'Not assigned'}</small></div>`).join(''):'<p class="muted">No work orders yet.</p>'}</section>
+  </div></article>`;
+}
+async function refreshMachines(){
+  machines=await api('/api/machines');
+  if(!machines.length){$('machine-table').innerHTML='<div class="empty"><strong>No machines yet</strong>Add customer machines to create lifetime service histories.</div>';$('machine-history').innerHTML='';return;}
+  $('machine-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Cosmos ID</th><th>Customer</th><th>Customer Machine No.</th><th>Type</th><th>Make / Model</th><th>Status</th><th></th></tr></thead><tbody>${machines.map(m=>`<tr><td><strong>${escapeHTML(m.code)}</strong></td><td>${escapeHTML(m.customer||'—')}</td><td>${escapeHTML(m.customer_machine_no||'—')}</td><td>${escapeHTML(m.machine_type||'—')}</td><td>${escapeHTML([m.manufacturer,m.model].filter(Boolean).join(' / ')||'—')}</td><td>${statusPill(m.status)}</td><td><button class="small-button" data-machine-open="${m.id}">History</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+async function showMachineHistory(id){
+  const h=await api('/api/machines/'+id+'/history'),m=h.machine;
+  $('machine-history').innerHTML=`<article class="section-card machine-history-card"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(m.code)}</span><h2>${escapeHTML(m.customer_machine_no||m.model||'Machine')}</h2><p class="muted">${escapeHTML(m.customer||'')} · ${escapeHTML(m.machine_type||'')} · ${escapeHTML(m.manufacturer||'')} ${escapeHTML(m.model||'')}</p></div></div>
+  <div class="history-timeline">${[...h.work_reports.map(r=>({date:r.date,title:r.work_details,meta:r.employee+' · '+(r.job_no||'Work report'),status:r.status})),...h.jobs.map(j=>({date:j.start_date||'',title:j.title,meta:j.code+' · '+(j.assignments.map(a=>a.employee).join(', ')||'Not assigned'),status:j.status}))].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`<div class="history-entry"><span>${escapeHTML(x.date||'—')}</span><div><strong>${escapeHTML(x.title)}</strong><small>${escapeHTML(x.meta)}</small></div>${statusPill(x.status)}</div>`).join('')||'<div class="empty">No history recorded for this machine yet.</div>'}</div></article>`;
+}
+async function refreshJobs(){
+  jobs=await api('/api/work-orders');
+  if(!jobs.length){$('job-table').innerHTML='<div class="empty"><strong>No work orders yet</strong>Create a work order and assign responsibility.</div>';return;}
+  $('job-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Customer</th><th>Machine</th><th>Owner</th><th>Assigned</th><th>Target</th><th>Status</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${jobs.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small class="muted">${escapeHTML(j.title)} · ${escapeHTML(j.work_type)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.machine_no||j.machine_code||'General')}</td><td>${escapeHTML(j.job_owner?.name||'—')}</td><td class="wrap-cell">${escapeHTML(j.assignments.map(a=>a.employee+' ('+a.role+')').join(', ')||'—')}</td><td>${escapeHTML(j.target_date||'—')}</td><td>${statusPill(j.status)}</td>${user.admin?`<td><button class="small-button" data-job-status="${j.id}" data-current="${escapeHTML(j.status)}">Update</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function openCustomerDialog(){$('customer-form').reset();$('customer-dialog-title').textContent='Add customer';$('customer-dialog').showModal();}
+async function openMachineDialog(customerId=''){
+  await ensureCustomers();$('machine-form').reset();$('machine-customer').innerHTML=customerOptions(customerId);$('machine-dialog').showModal();
+}
+async function loadJobMachines(customerId){
+  const list=await api('/api/machines?customer_id='+encodeURIComponent(customerId));
+  $('job-machine').innerHTML='<option value="">General / no specific machine</option>'+list.map(m=>`<option value="${m.id}">${escapeHTML(m.customer_machine_no||m.code)} · ${escapeHTML(m.machine_type||'Machine')}</option>`).join('');
+}
+async function openJobDialog(customerId=''){
+  await Promise.all([ensureCustomers(),ensureTeam()]);
+  $('job-form').reset();$('job-customer').innerHTML=customerOptions(customerId);$('job-owner').innerHTML='<option value="">Not set</option>'+employeeOptions();$('job-supervisor').innerHTML='<option value="">Not set</option>'+employeeOptions();$('job-assigned').innerHTML='<option value="">Not assigned</option>'+employeeOptions();
+  if($('job-customer').value)await loadJobMachines($('job-customer').value);
+  $('job-dialog').showModal();
+}
+async function prepareWorkLinks(){
+  try{
+    jobs=await api('/api/work-orders');machines=await api('/api/machines');
+    $('work-order-link').innerHTML='<option value="">Not linked</option>'+jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+    $('work-machine-link').innerHTML='<option value="">Not linked</option>'+machines.map(m=>`<option value="${m.id}">${escapeHTML(m.code)} · ${escapeHTML(m.customer_machine_no||m.model||'Machine')}</option>`).join('');
+  }catch(_){}
+}
+async function runNetworkSearch(){
+  const q=$('network-search').value.trim();
+  if(q.length<2){$('network-results').innerHTML='';return;}
+  const rows=await api('/api/network/search?q='+encodeURIComponent(q));
+  $('network-results').innerHTML=rows.length?rows.map(r=>`<button class="search-result" data-search-type="${escapeHTML(r.type)}" data-search-id="${r.id}"><strong>${escapeHTML(r.title)}</strong><span>${escapeHTML(r.type)} · ${escapeHTML(r.code||'')} · ${escapeHTML(r.subtitle||'')}</span></button>`).join(''):'<div class="empty compact-empty">No matches found.</div>';
+}
+
+async function ensureTeam(){
+  if(user.admin && !team.length) team=await api('/api/employees');
+  return team;
+}
+function employeeOptions(selected=''){
+  const rows=user.admin?team:[{id:user.id,name:user.name,code:user.code}];
+  return rows.map(e=>`<option value="${e.id}" ${String(e.id)===String(selected)?'selected':''}>${escapeHTML(e.name)} · ${escapeHTML(e.code.toUpperCase())}</option>`).join('');
+}
+async function refreshEcosystem(){
+  const x=await api('/api/ecosystem/summary');
+  $('eco-work').textContent=x.work_reports;
+  $('eco-completed').textContent=x.completed_work;
+  $('eco-issues').textContent=x.open_issues;
+  $('eco-actions').textContent=x.open_meeting_actions;
+}
+function statusPill(status){
+  const warning=['Blocked','Pending','Open','In Progress'].includes(status);
+  return `<span class="pill ${warning?'warning':'neutral'}">${escapeHTML(status)}</span>`;
+}
+async function refreshWork(){
+  const rows=await api('/api/work-reports');
+  if(!rows.length){$('work-table').innerHTML='<div class="empty"><strong>No work reports yet</strong>Add the first daily work report to start building the company memory.</div>';return;}
+  $('work-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Job / Customer</th><th>Work</th><th>Machine</th><th>Status</th><th>Problems</th>${user.admin?'<th>Review</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td><strong>${escapeHTML(r.job_no||'—')}</strong><small class="muted">${escapeHTML(r.customer||'')}</small></td><td class="wrap-cell">${escapeHTML(r.work_details)}</td><td>${escapeHTML(r.machine||'—')}</td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.problems||'—')}</td>${user.admin?`<td><button class="small-button" data-work-review="${r.id}">${r.verified_by?'Reviewed':'Review'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function refreshIssues(){
+  const rows=await api('/api/issues');
+  if(!rows.length){$('issues-table').innerHTML='<div class="empty"><strong>No problems recorded</strong>Reported difficulties and their resolutions will appear here.</div>';return;}
+  $('issues-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Category</th><th>Problem</th><th>Status</th><th>Resolution</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td>${escapeHTML(r.category)}</td><td class="wrap-cell"><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.detail)}</small></td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.resolution||'—')}</td>${user.admin?`<td><button class="small-button" data-issue-resolve="${r.id}">${r.status==='Resolved'?'Edit resolution':'Resolve'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function refreshMeetings(){
+  const rows=await api('/api/meetings');
+  if(!rows.length){$('meetings-list').innerHTML='<div class="empty"><strong>No meeting actions yet</strong>Meeting decisions and assigned actions will appear here.</div>';return;}
+  $('meetings-list').innerHTML=rows.map(m=>`<article class="meeting-card"><div><span class="eyebrow accent">${escapeHTML(m.date)}</span><h3>${escapeHTML(m.title)}</h3><p class="muted">${escapeHTML(m.notes||'No notes recorded.')}</p></div><div class="meeting-actions">${m.actions.length?m.actions.map(a=>`<div class="meeting-action"><div><strong>${escapeHTML(a.action)}</strong><small>${escapeHTML(a.employee)} · Due ${escapeHTML(a.due_date||'not set')}</small></div><div>${statusPill(a.status)} ${(!user.admin&&a.employee_id===user.id)||user.admin?`<button class="small-button" data-action-update="${a.id}" data-current="${escapeHTML(a.status)}">Update</button>`:''}</div></div>`).join(''):'<p class="muted">No actions assigned.</p>'}</div></article>`).join('');
+}
+async function openWorkDialog(){
+  if(user.admin){await ensureTeam();$('work-employee').innerHTML=employeeOptions();}
+  $('work-form').reset();$('work-date').value=today;await prepareWorkLinks();$('work-dialog').showModal();
+}
+async function openIssueDialog(){
+  if(user.admin){await ensureTeam();$('issue-employee').innerHTML=employeeOptions();}
+  $('issue-form').reset();$('issue-date').value=today;$('issue-dialog').showModal();
+}
+async function openMeetingDialog(){
+  await ensureTeam();$('meeting-form').reset();$('meeting-date').value=today;$('meeting-employee').innerHTML=employeeOptions();$('meeting-dialog').showModal();
+}
+
+let stockItems=[],suppliers=[];
+async function refreshStock(){
+  stockItems=await api('/api/stock-items');
+  $('stock-table').innerHTML=stockItems.length?`<div class="table-wrap"><table><thead><tr><th>SKU / item</th><th>Category</th><th>Location</th><th>On hand</th><th>Reorder</th><th>Actions</th></tr></thead><tbody>${stockItems.map(x=>`<tr><td><strong>${escapeHTML(x.sku)}</strong><small>${escapeHTML(x.name)} · ${escapeHTML(x.specification||'')}</small></td><td>${escapeHTML(x.category)}</td><td>${escapeHTML(x.location||'—')}</td><td>${escapeHTML(x.quantity)} ${escapeHTML(x.unit)}</td><td>${Number(x.quantity)<=Number(x.reorder_level)?'<span class="pill">Low stock</span>':escapeHTML(x.reorder_level)}</td><td><button class="small-button" data-stock-history="${x.id}">History</button> <button class="small-button" data-stock-move="${x.id}" ${x.active?'':'disabled'}>Move</button> <button class="small-button" data-stock-edit="${x.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No items yet</strong>Add your first stock item.</div>';
+}
+async function showStockHistory(id){
+  const rows=await api('/api/stock-items/'+id+'/movements');
+  $('stock-history').innerHTML=`<div class="section-card"><h3>Movement history · ${escapeHTML(stockItems.find(x=>x.id===Number(id))?.sku||id)}</h3>${rows.length?`<div class="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Change</th><th>Balance</th><th>Job</th><th>Reason / reference</th></tr></thead><tbody>${rows.map(m=>`<tr><td>${escapeHTML(new Date(m.at).toLocaleString('en-IN'))}</td><td>${escapeHTML(m.kind)}</td><td>${escapeHTML(m.change)}</td><td>${escapeHTML(m.balance)}</td><td>${escapeHTML(m.work_order_id||'—')}</td><td>${escapeHTML(m.reason)} · ${escapeHTML(m.reference||'')}</td></tr>`).join('')}</tbody></table></div>`:'<p>No movements yet.</p>'}</div>`;
+}
+async function refreshPurchasing(){
+  const [s,orders]=await Promise.all([api('/api/suppliers'),api('/api/purchase-orders')]);suppliers=s;
+  $('supplier-table').innerHTML=`<h3>Suppliers</h3>${s.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GSTIN</th></tr></thead><tbody>${s.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.contact||'—')}</td><td>${escapeHTML(x.phone||'—')}</td><td>${escapeHTML(x.gstin||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No suppliers yet.</p>'}`;
+  $('purchase-table').innerHTML=`<h3>Purchase orders</h3>${orders.length?`<div class="table-wrap"><table><thead><tr><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Status</th><th>Action</th></tr></thead><tbody>${orders.map(x=>`<tr><td>PO-${x.id}</td><td>${escapeHTML(x.supplier)}</td><td>${escapeHTML(x.item)}</td><td>${escapeHTML(x.ordered_qty)}</td><td>${escapeHTML(x.received_qty)}</td><td>${escapeHTML(x.status)}</td><td>${x.status==='Received'? 'Complete':`<button class="small-button" data-po-receive="${x.id}" data-outstanding="${Number(x.ordered_qty)-Number(x.received_qty)}">Receive</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No purchase orders yet.</p>'}`;
+}
+async function refreshProduction(){
+  const [steps,orders]=await Promise.all([api('/api/production-steps'),api('/api/work-orders')]);
+  const byId=new Map(orders.map(j=>[j.id,j]));
+  $('production-table').innerHTML=steps.length?`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Sequence / operation</th><th>Plan</th><th>Hours plan / actual</th><th>Accepted / rejected</th><th>Status</th><th>Action</th></tr></thead><tbody>${steps.map(s=>`<tr><td>${escapeHTML(byId.get(s.work_order_id)?.code||s.work_order_id)}</td><td>${s.sequence} · ${escapeHTML(s.operation)}</td><td>${escapeHTML(s.planned_date||'—')}</td><td>${escapeHTML(s.planned_hours)} / ${escapeHTML(s.actual_hours)}</td><td>${escapeHTML(s.accepted_qty)} / ${escapeHTML(s.rejected_qty)}</td><td>${escapeHTML(s.status)}${s.delay_reason?`<small>${escapeHTML(s.delay_reason)}</small>`:''}</td><td><button class="small-button" data-step-update="${s.id}">Update</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Add operations to a work order to plan production.</p>';
+}
+async function refreshMaintenance(){
+  const [assets,tasks]=await Promise.all([api('/api/company-assets'),api('/api/maintenance-tasks')]);
+  $('asset-table').innerHTML=`<h3>Company assets</h3>${assets.length?`<div class="table-wrap"><table><thead><tr><th>Code</th><th>Kind / name</th><th>Registration / serial</th><th>Next service</th></tr></thead><tbody>${assets.map(a=>`<tr><td>${escapeHTML(a.code)}</td><td>${escapeHTML(a.kind)} · ${escapeHTML(a.name)}</td><td>${escapeHTML(a.serial_or_registration||'—')}</td><td>${escapeHTML(a.next_service_date||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No company assets yet.</p>'}`;
+  $('maintenance-table').innerHTML=`<h3>Maintenance tasks</h3>${tasks.length?`<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type / work</th><th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>${tasks.map(t=>`<tr><td>${escapeHTML(t.asset)}</td><td>${escapeHTML(t.task_type)} · ${escapeHTML(t.description)}</td><td>${escapeHTML(t.due_date||'—')}</td><td>${escapeHTML(t.status)}</td><td>${t.status==='Completed'?'Done':`<button class="small-button" data-task-complete="${t.id}">Complete</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No maintenance tasks yet.</p>'}`;
+}
+async function refreshAnalytics(){
+  const data=await api('/api/management-summary');
+  const labels={open_jobs:'Open jobs',overdue_jobs:'Overdue jobs',blocked_steps:'Blocked operations',accepted_quantity:'Accepted quantity',rejected_quantity:'Rejected quantity',low_stock:'Low stock items',open_maintenance:'Open maintenance'};
+  $('analytics-content').innerHTML=Object.entries(labels).map(([k,label])=>`<article class="stat"><span>${label}</span><strong>${escapeHTML(data[k])}</strong></article>`).join('');
+}
+async function refreshQuotations(){
+  const rows=await api('/api/quotations');
+  $('quotation-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Quote</th><th>Customer / scope</th><th>Amount ₹</th><th>Follow up</th><th>Status</th><th>Work order</th><th>Action</th></tr></thead><tbody>${rows.map(q=>`<tr><td>${escapeHTML(q.code)} <small>Rev ${q.revision}</small></td><td>${escapeHTML(q.customer)}<small>${escapeHTML(q.title)}</small></td><td>${escapeHTML(q.amount)}</td><td>${escapeHTML(q.follow_up_date||'—')}</td><td>${escapeHTML(q.status)}</td><td>${escapeHTML(q.work_order_id||'—')}</td><td>${q.work_order_id?'Converted':`<button class="small-button" data-quote-status="${q.id}">Status</button> <button class="small-button" data-quote-accept="${q.id}">Accept PO</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No quotations yet.</p>';
+}
+async function refreshJobFiles(){
+  const jobs=await api('/api/work-orders'),select=$('job-file-select'),current=select.value;
+  select.innerHTML=jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+  if(jobs.some(j=>String(j.id)===current))select.value=current;
+  if(!select.value){$('job-material-table').innerHTML='<p>Create a work order first.</p>';$('job-drawing-table').innerHTML='';return;}
+  const id=select.value,[materials,drawings,items,documents,quality,dispatch]=await Promise.all([api('/api/work-orders/'+id+'/materials'),api('/api/work-orders/'+id+'/drawings'),api('/api/stock-items'),api('/api/documents/job/'+id),api('/api/work-orders/'+id+'/quality'),api('/api/work-orders/'+id+'/dispatch')]);
+  const itemMap=new Map(items.map(x=>[x.id,x]));
+  $('job-material-table').innerHTML=`<h3>Material requirements</h3>${materials.length?`<div class="table-wrap"><table><thead><tr><th>Material</th><th>Required</th><th>Reserved</th><th>Issued</th><th>Available</th><th>Action</th></tr></thead><tbody>${materials.map(m=>`<tr><td>${escapeHTML(m.sku)} · ${escapeHTML(m.item)}</td><td>${escapeHTML(m.required)}</td><td>${escapeHTML(m.reserved)}</td><td>${escapeHTML(m.issued)}</td><td>${escapeHTML(itemMap.get(m.item_id)?.available||'—')}</td><td><button class="small-button" data-material-action="reserve" data-requirement="${m.id}">Reserve</button> <button class="small-button" data-material-action="issue" data-requirement="${m.id}">Issue</button> <button class="small-button" data-material-action="release" data-requirement="${m.id}">Release</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No material requirements yet.</p>'}`;
+  $('job-drawing-table').innerHTML=`<h3>Drawing revisions</h3>${drawings.length?`<div class="table-wrap"><table><thead><tr><th>Drawing</th><th>Revision</th><th>File reference</th><th>Status</th><th>Action</th></tr></thead><tbody>${drawings.map(d=>`<tr><td>${escapeHTML(d.drawing_no)}</td><td>${escapeHTML(d.revision)}</td><td>${escapeHTML(d.file_reference)}</td><td>${d.approved?'Approved':'Pending'}</td><td>${d.approved?'Current':`<button class="small-button" data-drawing-approve="${d.id}">Approve</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No drawing revisions yet.</p>'}`;
+  $('job-documents').innerHTML='<h3>Private documents</h3>'+documentLinks(documents);
+  $('job-quality').innerHTML='<h3>Quality checks</h3>'+(quality.map(q=>`<p>${escapeHTML(q.operation)} · ${escapeHTML(q.result)} · accepted ${escapeHTML(q.accepted)}, rejected ${escapeHTML(q.rejected)} ${escapeHTML(q.defect||'')}</p>`).join('')||'<p class="muted">No inspections yet.</p>');
+  $('job-dispatch').innerHTML='<h3>Dispatch</h3>'+(dispatch.map(d=>`<p>${escapeHTML(d.date)} · ${escapeHTML(d.quantity)} · ${escapeHTML(d.transporter||'')} · ${escapeHTML(d.tracking_reference||'')}</p>`).join('')||'<p class="muted">No dispatch recorded.</p>');
+}
+function documentLinks(rows){return rows.map(d=>`<p><a href="/api/documents/download/${d.id}">${escapeHTML(d.filename)}</a> · ${escapeHTML(new Date(d.uploaded_at).toLocaleDateString('en-IN'))}</p>`).join('')||'<p class="muted">No documents uploaded.</p>';}
+async function loadEmployeeDocuments(id){$('employee-documents').innerHTML='<h3>Private documents</h3>'+documentLinks(await api('/api/documents/employee/'+id));}
+
+function moduleIcon(view){
+  const paths={home:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',customers:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8 M17 4a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9',quotations:'M6 3h12v18l-3-2-3 2-3-2-3 2z M9 7h6 M9 11h6 M9 15h3',jobs:'M3 7h18v14H3z M8 7V3h8v4 M3 12h18 M10 12v3h4v-3',inventory:'M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10 M8 5l9 4',production:'M3 21V9l6 4V7l6 5V3h5v18z M7 17h1 M12 17h1 M17 17h1',maintenance:'M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4z',analytics:'M4 3v18h17 M8 16v-4 M13 16V8 M18 16V5',overview:'M4 5h16v16H4z M8 3v4 M16 3v4 M4 11h16 M8 15h3',issues:'M12 3L2 21h20z M12 9v5 M12 17v1',meetings:'M3 4h18v13H8l-5 4z M7 8h10 M7 12h6'};
+  const path=paths[view]||paths[{employees:'customers',purchasing:'inventory',machines:'maintenance',checkin:'overview'}[view]]||'M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
+}
+function closeNavigation(){document.body.classList.remove('navigation-open');$('navigation-backdrop').hidden=true;$('open-navigation').setAttribute('aria-expanded','false');}
+async function refreshHome(){
+  $('home-metrics').innerHTML='<p class="muted">Loading your workspace…</p>';
+  const [summary,orders,quotes,stock,purchases]=await Promise.all([api('/api/management-summary'),api('/api/work-orders'),api('/api/quotations'),api('/api/stock-items'),api('/api/purchase-orders')]);
+  const activeOrders=orders.filter(j=>!['Completed','Closed','Cancelled'].includes(j.status));
+  const followUps=quotes.filter(q=>!['Accepted','Lost'].includes(q.status)&&q.follow_up_date&&q.follow_up_date<=today);
+  const shortages=stock.filter(s=>s.active&&Number(s.available??s.quantity)<=Number(s.reorder_level));
+  const pendingQuotes=quotes.filter(q=>!['Accepted','Lost'].includes(q.status));
+  const pendingPurchases=purchases.filter(p=>!['Received','Cancelled'].includes(p.status));
+  const metrics=[['Open work orders',summary.open_jobs,'Across production & service','jobs'],['Overdue jobs',summary.overdue_jobs,'Past their promised date','jobs'],['Low stock items',shortages.length,'Available stock at reorder level','inventory'],['Open maintenance',summary.open_maintenance,'Service tasks awaiting completion','maintenance']];
+  $('home-metrics').innerHTML=metrics.map(([label,value,note,view],i)=>`<button class="stat metric-card" data-home-view="${view}"><span class="metric-top">${label}<span class="metric-icon">${moduleIcon(view)}</span></span><strong>${escapeHTML(value)}</strong><small>${note} <span aria-hidden="true">↗</span></small></button>`).join('');
+  const attention=[['Overdue work orders',summary.overdue_jobs,'Review delivery dates and blockers','jobs'],['Quotation follow-ups',followUps.length,'Enquiries with a follow-up due today or earlier','quotations'],['Material shortages',shortages.length,'Review reservations and purchasing','inventory'],['Blocked operations',summary.blocked_steps,'Resolve delays on the production floor','production']];
+  $('home-attention').innerHTML=attention.map(([label,count,note,view])=>`<button class="attention-row" data-home-view="${view}"><span class="attention-number ${count?'needs-action':''}">${escapeHTML(count)}</span><span><strong>${label}</strong><small>${note}</small></span><span class="row-arrow">↗</span></button>`).join('');
+  const stages=[['01','Quotations',pendingQuotes.length,'quotations'],['02','Open work orders',summary.open_jobs,'jobs'],['03','Awaiting materials',pendingPurchases.length,'purchasing']];
+  $('home-flow').innerHTML=stages.map(([n,label,count,view])=>`<button class="flow-row" data-home-view="${view}"><span class="flow-index">${n}</span><span>${label}${view==='purchasing'?'<small>Outstanding purchase orders</small>':''}</span><strong>${escapeHTML(count)}</strong></button>`).join('');
+  const upcoming=activeOrders.sort((a,b)=>(a.target_date||'9999').localeCompare(b.target_date||'9999')).slice(0,5);
+  $('home-jobs').innerHTML=upcoming.length?`<div class="table-wrap"><table><thead><tr><th>Work order</th><th>Customer</th><th>Target date</th><th>Status</th><th></th></tr></thead><tbody>${upcoming.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small>${escapeHTML(j.title)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.target_date||'Not scheduled')}</td><td>${statusPill(j.status)}</td><td><button class="small-button" data-home-job="${j.id}">Open job →</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>Your next job starts here</strong>Create a work order or accept a quotation to begin.</div>';
+}
+
+const views = {
+  home:['Workspace overview','Your daily view of customers, people and production.','▦'],
+  overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
+  ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
+  customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
+  machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
+  jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
+  quotations:['Quotations','Enquiries, follow-ups and customer purchase orders.','▣'],
+  'job-files':['Job files','Materials, reservations and approved drawings by work order.','▤'],
+  inventory:['Inventory','Items, available quantities and stock movements.','▥'],
+  purchasing:['Purchasing','Suppliers, orders and goods received.','◫'],
+  production:['Production planning','Operations from drawing to dispatch.','▧'],
+  maintenance:['Maintenance','Company machines, bikes and service tasks.','⚒'],
+  analytics:['Management summary','Live company operating measures.','◉'],
+  employees:['Employees','The people behind every working day.','⊞'],
+  work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
+  issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
+  meetings:['Meetings & actions','Decisions, owners, deadlines and follow-up.','☷'],
+  reports:['Monthly reports','Attendance records, ready for your monthly review.','▤'],
+  checkin:['My attendance','Check in, get to work, and make today count.','◎']
+};
 async function navigate(view) {
-  if (!views[view] || (user.admin ? view === 'checkin' : view !== 'checkin')) throw new Error('This page is not available.');
+  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
+  closeNavigation();
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
-  document.querySelectorAll('.nav-button').forEach(el => el.classList.toggle('active',el.dataset.view===view));
+  document.querySelectorAll('.nav-button').forEach(el => {el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
   $('page-title').textContent=views[view][0]; $('page-subtitle').textContent=views[view][1]; $('breadcrumb').textContent=views[view][0];
+  if(view === 'home') await refreshHome();
   if(view === 'overview') await refreshOverview();
+  if(view === 'ecosystem') await refreshEcosystem();
   if(view === 'employees') await refreshEmployees();
+  if(view === 'customers') await refreshCustomers();
+  if(view === 'machines') await refreshMachines();
+  if(view === 'jobs') await refreshJobs();
+  if(view === 'quotations') await refreshQuotations();
+  if(view === 'job-files') await refreshJobFiles();
+  if(view === 'inventory') await refreshStock();
+  if(view === 'purchasing') await refreshPurchasing();
+  if(view === 'production') await refreshProduction();
+  if(view === 'maintenance') await refreshMaintenance();
+  if(view === 'analytics') await refreshAnalytics();
+  if(view === 'work') await refreshWork();
+  if(view === 'issues') await refreshIssues();
+  if(view === 'meetings') await refreshMeetings();
   if(view === 'reports') attendanceTable('monthly-table',await api('/api/attendance?month='+$('month-filter').value),true);
   if(view === 'checkin') await refreshMine();
 }
 async function showApp() {
   $('login-view').hidden = true; $('app-view').hidden = false;
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
+  $('account-avatar').textContent=user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('');
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','employees','reports'] : ['checkin'];
-  $('navigation').innerHTML = names.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${views[view][2]}</span>${view==='overview'?'Overview':views[view][0]}</button>`).join('');
+  const groups=user.admin?[
+    ['Workspace',['home']],['Sales & customers',['customers','quotations','machines']],
+    ['Operations',['jobs','job-files','production','inventory','purchasing','maintenance']],
+    ['People & collaboration',['overview','employees','work','issues','meetings']],
+    ['Insights',['analytics','reports','ecosystem']]
+  ]:[['My workspace',['checkin','jobs','work','issues','meetings']]];
+  const names=groups.flatMap(g=>g[1]);
+  document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
+  $('add-meeting').hidden=!user.admin;
+  $('add-job').hidden=!user.admin;
+  const shortNames={home:'Overview',overview:'Attendance',ecosystem:'Company memory',analytics:'Management summary'};
+  $('navigation').innerHTML=groups.map(([title,list])=>`<section class="nav-group"><h2>${title}</h2>${list.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${moduleIcon(view)}</span><span>${shortNames[view]||views[view][0]}</span></button>`).join('')}</section>`).join('');
+  $('module-search').value='';$('nav-no-results').hidden=true;
   await navigate(names[0]);
+  const linkedJob=new URLSearchParams(location.search).get('job');
+  if(user.admin && /^\d+$/.test(linkedJob||'')){
+    await navigate('job-files');$('job-file-select').value=linkedJob;await refreshJobFiles();
+  }
 }
 async function boot() {
   const info = await api('/api/session'); csrf=info.csrf; user=info.user; today=info.today; zone=info.timezone;
   if(user) await showApp(); else {$('app-view').hidden=true; $('login-view').hidden=false;}
 }
-function b64urlToBytes(value){const pad='='.repeat((4-value.length%4)%4),b64=(value+pad).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(b64);return Uint8Array.from(raw,c=>c.charCodeAt(0));}
-function bytesToB64url(value){const bytes=new Uint8Array(value);let raw='';bytes.forEach(b=>raw+=String.fromCharCode(b));return btoa(raw).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
-function decodeCreationOptions(o){o.challenge=b64urlToBytes(o.challenge);o.user.id=b64urlToBytes(o.user.id);(o.excludeCredentials||[]).forEach(c=>c.id=b64urlToBytes(c.id));return o;}
-function decodeRequestOptions(o){o.challenge=b64urlToBytes(o.challenge);(o.allowCredentials||[]).forEach(c=>c.id=b64urlToBytes(c.id));return o;}
-function credentialJSON(c){return {id:c.id,rawId:bytesToB64url(c.rawId),type:c.type,authenticatorAttachment:c.authenticatorAttachment||undefined,clientExtensionResults:c.getClientExtensionResults(),response:{clientDataJSON:bytesToB64url(c.response.clientDataJSON),authenticatorData:c.response.authenticatorData?bytesToB64url(c.response.authenticatorData):undefined,signature:c.response.signature?bytesToB64url(c.response.signature):undefined,userHandle:c.response.userHandle?bytesToB64url(c.response.userHandle):null,attestationObject:c.response.attestationObject?bytesToB64url(c.response.attestationObject):undefined,transports:c.response.getTransports?c.response.getTransports():undefined}};}
-async function registerBiometric(){if(!window.PublicKeyCredential)throw new Error('Biometric/passkey login is not supported by this browser.');const options=decodeCreationOptions(await api('/api/biometric/register/options','POST',{}));const credential=await navigator.credentials.create({publicKey:options});if(!credential)throw new Error('Biometric registration was cancelled.');await api('/api/biometric/register/verify','POST',credentialJSON(credential));notice('Biometric login registered on this device.');}
-async function loginBiometric(){const code=$('login-code').value.trim();if(!code)throw new Error('Enter your Employee ID first.');if(!window.PublicKeyCredential)throw new Error('Biometric/passkey login is not supported by this browser.');const options=decodeRequestOptions(await api('/api/biometric/login/options','POST',{code}));const credential=await navigator.credentials.get({publicKey:options});if(!credential)throw new Error('Biometric login was cancelled.');const data=await api('/api/biometric/login/verify','POST',credentialJSON(credential));csrf=data.csrf;user=data.user;await showApp();}
-$('biometric-login').addEventListener('click',()=>perform(loginBiometric));
-$('register-biometric').addEventListener('click',()=>perform(registerBiometric));
 $('login-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
   const button=e.currentTarget.querySelector('button');button.disabled=true;
   try {const data=await api('/api/login','POST',Object.fromEntries(new FormData($('login-form'))));csrf=data.csrf;user=data.user;$('login-form').reset();await showApp();}finally{button.disabled=false;}
 });});
 $('logout').addEventListener('click',()=>perform(async()=>{await api('/api/logout','POST',{});stopCamera();await boot();}));
 $('navigation').addEventListener('click',e=>{const button=e.target.closest('[data-view]');if(button)perform(()=>navigate(button.dataset.view));});
+$('open-navigation').addEventListener('click',()=>{document.body.classList.add('navigation-open');$('navigation-backdrop').hidden=false;$('open-navigation').setAttribute('aria-expanded','true');$('close-navigation').focus();});
+$('close-navigation').addEventListener('click',()=>{closeNavigation();$('open-navigation').focus();});
+$('navigation-backdrop').addEventListener('click',closeNavigation);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeNavigation();});
+$('module-search').addEventListener('input',e=>{const term=e.target.value.trim().toLowerCase();let matches=0;document.querySelectorAll('.nav-group').forEach(group=>{let found=0;group.querySelectorAll('.nav-button').forEach(button=>{button.hidden=!button.textContent.toLowerCase().includes(term);if(!button.hidden){found++;matches++;}});group.hidden=!found;});$('nav-no-results').hidden=matches>0;});
+$('home-panel').addEventListener('click',e=>perform(async()=>{const view=e.target.closest('[data-home-view]'),action=e.target.closest('[data-home-action]'),job=e.target.closest('[data-home-job]');if(view)return navigate(view.dataset.homeView);if(action){if(action.dataset.homeAction==='quote'){await navigate('quotations');$('add-quotation').click();}else {await navigate('jobs');await openJobDialog();}}if(job){await navigate('job-files');$('job-file-select').value=job.dataset.homeJob;await refreshJobFiles();}}));
 $('day-filter').addEventListener('change',()=>perform(refreshOverview));
 $('month-filter').addEventListener('change',()=>perform(()=>navigate('reports')));
 $('export').addEventListener('click',()=>perform(async()=>{
@@ -108,20 +342,122 @@ $('export').addEventListener('click',()=>perform(async()=>{
   if(!response.ok){const error=await response.json();throw new Error(error.error);}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='cosmos-attendance-'+month+'.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }));
+
+
+$('add-customer').addEventListener('click',()=>perform(openCustomerDialog));
+$('add-stock-item').addEventListener('click',()=>{$('stock-form').reset();$('stock-form').elements.sku.disabled=false;$('stock-dialog').showModal();});
+$('stock-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api(id?'/api/stock-items/'+id:'/api/stock-items',id?'PATCH':'POST',d);$('stock-dialog').close();await refreshStock();notice('Stock item saved.');});});
+$('stock-table').addEventListener('click',e=>perform(async()=>{const h=e.target.closest('[data-stock-history]'),m=e.target.closest('[data-stock-move]'),ed=e.target.closest('[data-stock-edit]');if(h)return showStockHistory(h.dataset.stockHistory);if(m){$('movement-form').reset();$('movement-form').elements.item_id.value=m.dataset.stockMove;$('movement-dialog').showModal();}if(ed){const x=stockItems.find(i=>i.id===Number(ed.dataset.stockEdit)),f=$('stock-form');f.reset();for(const k of ['sku','name','category','unit','specification','location','reorder_level'])f.elements[k].value=x[k]||'';f.elements.item_id.value=x.id;f.elements.sku.disabled=true;$('stock-dialog').showModal();}}));
+$('movement-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api('/api/stock-items/'+id+'/movements','POST',d);$('movement-dialog').close();await refreshStock();await showStockHistory(id);notice('Stock movement recorded.');});});
+$('add-supplier').addEventListener('click',()=>{$('supplier-form').reset();$('supplier-dialog').showModal();});
+$('supplier-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/suppliers','POST',Object.fromEntries(new FormData(e.currentTarget)));$('supplier-dialog').close();await refreshPurchasing();notice('Supplier saved.');});});
+$('add-purchase-order').addEventListener('click',()=>perform(async()=>{const [s,items]=await Promise.all([api('/api/suppliers'),api('/api/stock-items')]);if(!s.length||!items.length)throw new Error('Add a supplier and a stock item first.');const f=$('purchase-form');f.reset();f.elements.supplier_id.innerHTML=s.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.name)}</option>`).join('');f.elements.item_id.innerHTML=items.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.sku)} · ${escapeHTML(x.name)}</option>`).join('');$('purchase-dialog').showModal();}));
+$('purchase-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/purchase-orders','POST',Object.fromEntries(new FormData(e.currentTarget)));$('purchase-dialog').close();await refreshPurchasing();notice('Purchase order created.');});});
+$('purchase-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-po-receive]');if(!b)return;const value=prompt('Quantity received (maximum '+b.dataset.outstanding+')',b.dataset.outstanding);if(value===null)return;await api('/api/purchase-orders/'+b.dataset.poReceive+'/receive','POST',{quantity:value});await refreshPurchasing();notice('Receipt added to stock.');}));
+$('employee-file-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.employee_id;delete d.employee_id;await api('/api/employee-files/'+id,'PATCH',d);$('employee-file-dialog').close();notice('Employee file saved.');});});
+$('add-production-step').addEventListener('click',()=>perform(async()=>{const orders=await api('/api/work-orders');if(!orders.length)throw new Error('Create a work order first.');const f=$('production-form');f.reset();f.elements.work_order_id.innerHTML=orders.map(x=>`<option value="${x.id}">${escapeHTML(x.code)} · ${escapeHTML(x.title)}</option>`).join('');$('production-dialog').showModal();}));
+$('production-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/production-steps','POST',Object.fromEntries(new FormData(e.currentTarget)));$('production-dialog').close();await refreshProduction();notice('Operation added.');});});
+$('production-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-step-update]');if(!b)return;const status=prompt('Status: Planned, In Progress, Blocked, Completed');if(status===null)return;if(!['Planned','In Progress','Blocked','Completed'].includes(status))throw new Error('Invalid status.');const actual_hours=prompt('Actual hours (total)','0'),accepted_qty=prompt('Accepted quantity (total)','0'),rejected_qty=prompt('Rejected quantity (total)','0'),delay_reason=status==='Blocked'?prompt('Reason for delay',''):'';if([actual_hours,accepted_qty,rejected_qty,delay_reason].includes(null))return;await api('/api/production-steps/'+b.dataset.stepUpdate,'PATCH',{status,actual_hours,accepted_qty,rejected_qty,delay_reason});await refreshProduction();notice('Production updated.');}));
+$('add-asset').addEventListener('click',()=>{$('asset-form').reset();$('asset-dialog').showModal();});
+$('asset-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/company-assets','POST',Object.fromEntries(new FormData(e.currentTarget)));$('asset-dialog').close();await refreshMaintenance();notice('Asset saved.');});});
+$('add-maintenance-task').addEventListener('click',()=>perform(async()=>{const assets=await api('/api/company-assets');if(!assets.length)throw new Error('Add a company asset first.');const f=$('maintenance-form');f.reset();f.elements.asset_id.innerHTML=assets.map(a=>`<option value="${a.id}">${escapeHTML(a.code)} · ${escapeHTML(a.name)}</option>`).join('');$('maintenance-dialog').showModal();}));
+$('maintenance-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/maintenance-tasks','POST',Object.fromEntries(new FormData(e.currentTarget)));$('maintenance-dialog').close();await refreshMaintenance();notice('Maintenance task created.');});});
+$('maintenance-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-task-complete]');if(!b)return;const cost=prompt('Repair/service cost ₹','0'),downtime_hours=prompt('Downtime hours','0'),notes=prompt('Completion notes','');if([cost,downtime_hours,notes].includes(null))return;await api('/api/maintenance-tasks/'+b.dataset.taskComplete,'PATCH',{status:'Completed',cost,downtime_hours,notes});await refreshMaintenance();notice('Task completed.');}));
+$('refresh-analytics').addEventListener('click',()=>perform(refreshAnalytics));
+$('add-quotation').addEventListener('click',()=>perform(async()=>{await ensureCustomers();if(!customers.length)throw new Error('Add a customer first.');const f=$('quotation-form');f.reset();f.elements.customer_id.innerHTML=customerOptions();$('quotation-dialog').showModal();}));
+$('quotation-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/quotations','POST',Object.fromEntries(new FormData(e.currentTarget)));$('quotation-dialog').close();await refreshQuotations();notice('Quotation created.');});});
+$('quotation-table').addEventListener('click',e=>perform(async()=>{const accept=e.target.closest('[data-quote-accept]'),status=e.target.closest('[data-quote-status]');if(status){const next=prompt('Status: Draft, Sent, Negotiation, Lost','Sent');if(next===null)return;if(!['Draft','Sent','Negotiation','Lost'].includes(next))throw new Error('Invalid quote status.');await api('/api/quotations/'+status.dataset.quoteStatus,'PATCH',{status:next});await refreshQuotations();return;}if(accept){const customer_po=prompt('Enter customer purchase order number');if(customer_po===null)return;if(!customer_po.trim())throw new Error('Customer PO is required.');await api('/api/quotations/'+accept.dataset.quoteAccept+'/accept','POST',{customer_po});await refreshQuotations();notice('Quotation accepted; work order created.');}}));
+$('job-file-select').addEventListener('change',()=>perform(refreshJobFiles));
+$('add-job-material').addEventListener('click',()=>perform(async()=>{if(!$('job-file-select').value)throw new Error('Create a work order first.');const items=await api('/api/stock-items');const f=$('job-material-form');f.reset();f.elements.item_id.innerHTML=items.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.sku)} · ${escapeHTML(x.name)}</option>`).join('');if(!f.elements.item_id.value)throw new Error('Add a stock item first.');$('job-material-dialog').showModal();}));
+$('job-material-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/materials','POST',Object.fromEntries(new FormData(e.currentTarget)));$('job-material-dialog').close();await refreshJobFiles();notice('Material requirement saved.');});});
+$('job-material-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-material-action]');if(!b)return;const quantity=prompt('Quantity to '+b.dataset.materialAction);if(quantity===null)return;await api('/api/job-materials/'+b.dataset.requirement+'/'+b.dataset.materialAction,'POST',{quantity});await refreshJobFiles();notice('Material '+b.dataset.materialAction+' recorded.');}));
+$('add-job-drawing').addEventListener('click',()=>{if(!$('job-file-select').value)return notice('Create a work order first.',true);$('drawing-form').reset();$('drawing-dialog').showModal();});
+$('drawing-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/drawings','POST',Object.fromEntries(new FormData(e.currentTarget)));$('drawing-dialog').close();await refreshJobFiles();notice('Drawing revision added.');});});
+$('job-drawing-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-drawing-approve]');if(!b)return;if(!confirm('Approve this revision for production?'))return;await api('/api/drawings/'+b.dataset.drawingApprove+'/approve','POST',{});await refreshJobFiles();notice('Drawing revision approved.');}));
+$('print-job-card').addEventListener('click',()=>{const id=$('job-file-select').value;if(!id)return notice('Select a work order.',true);window.open('/api/work-orders/'+id+'/job-card','_blank','noopener');});
+$('upload-job-document').addEventListener('click',()=>{const id=$('job-file-select').value;if(!id)return notice('Select a work order.',true);openDocumentDialog('job',id);});
+$('upload-employee-document').addEventListener('click',()=>openDocumentDialog('employee',$('employee-file-form').elements.employee_id.value));
+function openDocumentDialog(type,id){const f=$('document-form');f.reset();f.elements.owner_type.value=type;f.elements.owner_id.value=id;$('document-dialog').showModal();}
+$('document-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const f=e.currentTarget,type=f.elements.owner_type.value,id=f.elements.owner_id.value,body=new FormData(f);body.delete('owner_type');body.delete('owner_id');const response=await fetch('/api/documents/'+type+'/'+id,{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':csrf},body});const result=await response.json();if(!response.ok)throw new Error(result.error||'Upload failed.');$('document-dialog').close();if(type==='employee')await loadEmployeeDocuments(id);else await refreshJobFiles();notice('Document uploaded.');});});
+$('add-quality').addEventListener('click',()=>{if(!$('job-file-select').value)return notice('Select a work order.',true);$('quality-form').reset();$('quality-dialog').showModal();});
+$('quality-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/quality','POST',Object.fromEntries(new FormData(e.currentTarget)));$('quality-dialog').close();await refreshJobFiles();notice('Inspection recorded.');});});
+$('add-dispatch').addEventListener('click',()=>{if(!$('job-file-select').value)return notice('Select a work order.',true);$('dispatch-form').reset();$('dispatch-form').elements.dispatch_date.value=today;$('dispatch-dialog').showModal();});
+$('dispatch-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/dispatch','POST',Object.fromEntries(new FormData(e.currentTarget)));$('dispatch-dialog').close();await refreshJobFiles();notice('Dispatch recorded.');});});
+$('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
+$('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
+$('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;await api(id?'/api/customers/'+id:'/api/customers',id?'PATCH':'POST',d);$('customer-dialog').close();await refreshCustomers();if(id)await showCustomerDetail(id);notice('Customer saved.');});});
+$('contact-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id,contactId=d.contact_id;delete d.customer_id;delete d.contact_id;d.primary_contact=e.currentTarget.elements.primary_contact.checked;await api('/api/customers/'+id+'/contacts'+(contactId?'/'+contactId:''),contactId?'PATCH':'POST',d);$('contact-dialog').close();await showCustomerDetail(id);notice('Customer contact saved.');});});
+$('machine-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/machines','POST',Object.fromEntries(new FormData(e.currentTarget)));$('machine-dialog').close();machines=[];await refreshMachines();notice('Machine created.');});});
+$('job-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget));d.assigned_employee_ids=d.assigned_employee_id?[Number(d.assigned_employee_id)]:[];delete d.assigned_employee_id;await api('/api/work-orders','POST',d);$('job-dialog').close();jobs=[];await refreshJobs();notice('Work order created.');});});
+$('job-customer').addEventListener('change',e=>perform(()=>loadJobMachines(e.target.value)));
+$('customer-table').addEventListener('click',e=>{const b=e.target.closest('[data-customer-open]');if(b)perform(()=>showCustomerDetail(b.dataset.customerOpen));});
+$('customer-detail').addEventListener('click',e=>perform(async()=>{
+  const c=e.target.closest('[data-add-contact]'),m=e.target.closest('[data-add-machine-customer]'),j=e.target.closest('[data-add-job-customer]'),mh=e.target.closest('[data-machine-open]'),ec=e.target.closest('[data-edit-customer]'),ac=e.target.closest('[data-archive-customer]'),ct=e.target.closest('[data-edit-contact]');
+  if(ec){const row=await api('/api/customers/'+ec.dataset.editCustomer);const form=$('customer-form');form.reset();for(const key of ['name','gstin','industry','phone','email','address','notes'])form.elements[key].value=row[key]||'';form.elements.customer_id.value=row.id;$('customer-dialog-title').textContent='Edit customer';$('customer-dialog').showModal();return;}
+  if(ac){const id=ac.dataset.archiveCustomer,row=await api('/api/customers/'+id),status=row.status==='Archived'?'Active':'Archived';if(status==='Archived'&&!confirm('Archive this customer? Their history will be kept.'))return;await api('/api/customers/'+id,'PATCH',{status});await refreshCustomers();await showCustomerDetail(id);notice('Customer '+status.toLowerCase()+'.');return;}
+  if(ct){const id=ct.dataset.customerId,row=await api('/api/customers/'+id),contact=row.contacts.find(x=>x.id===Number(ct.dataset.editContact));if(!contact)throw new Error('Contact not found.');const form=$('contact-form');form.reset();for(const key of ['name','designation','department','phone','email','notes'])form.elements[key].value=contact[key]||'';form.elements.primary_contact.checked=contact.primary_contact;form.elements.customer_id.value=id;form.elements.contact_id.value=contact.id;$('contact-dialog-title').textContent='Edit contact';$('contact-dialog').showModal();return;}
+  if(c){$('contact-form').reset();$('contact-customer-id').value=c.dataset.addContact;$('contact-dialog-title').textContent='Add customer contact';$('contact-dialog').showModal();return;}
+  if(m){await openMachineDialog(m.dataset.addMachineCustomer);return;}
+  if(j){await openJobDialog(j.dataset.addJobCustomer);return;}
+  if(mh){await navigate('machines');await showMachineHistory(mh.dataset.machineOpen);}
+}));
+$('machine-table').addEventListener('click',e=>{const b=e.target.closest('[data-machine-open]');if(b)perform(()=>showMachineHistory(b.dataset.machineOpen));});
+$('job-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-job-status]');if(!b)return;const next=prompt('Status: Open, In Progress, On Hold, Completed, Closed or Cancelled',b.dataset.current);if(next===null)return;const allowed=['Open','In Progress','On Hold','Completed','Closed','Cancelled'];if(!allowed.includes(next))throw new Error('Use one of: '+allowed.join(', '));await api('/api/work-orders/'+b.dataset.jobStatus,'PATCH',{status:next,completed_date:next==='Completed'?today:null});await refreshJobs();notice('Work order updated.');}));
+let networkTimer;
+$('network-search').addEventListener('input',()=>{clearTimeout(networkTimer);networkTimer=setTimeout(()=>perform(runNetworkSearch),250);});
+$('network-results').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-search-type]');if(!b)return;const type=b.dataset.searchType,id=b.dataset.searchId;if(type==='Customer'){await showCustomerDetail(id);}else if(type==='Machine'){await navigate('machines');await showMachineHistory(id);}else if(type==='Work Order'){await navigate('jobs');}else if(type==='Employee'){await navigate('employees');}}));
+
+$('add-work').addEventListener('click',()=>perform(openWorkDialog));
+$('add-issue').addEventListener('click',()=>perform(openIssueDialog));
+$('add-meeting').addEventListener('click',()=>perform(openMeetingDialog));
+document.querySelectorAll('[data-jump]').forEach(b=>b.addEventListener('click',()=>perform(()=>navigate(b.dataset.jump))));
+$('work-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const data=Object.fromEntries(new FormData(e.currentTarget));if(!user.admin)delete data.employee_id;
+  await api('/api/work-reports','POST',data);$('work-dialog').close();await refreshWork();notice('Work report saved.');
+});});
+$('issue-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const data=Object.fromEntries(new FormData(e.currentTarget));if(!user.admin)delete data.employee_id;
+  await api('/api/issues','POST',data);$('issue-dialog').close();await refreshIssues();notice('Problem recorded.');
+});});
+$('meeting-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const fd=new FormData(e.currentTarget), action=$('meeting-action').value.trim();
+  const actions=action?[{employee_id:Number($('meeting-employee').value),action,due_date:$('meeting-due').value||null}]:[];
+  await api('/api/meetings','POST',{date:fd.get('date'),title:fd.get('title'),notes:fd.get('notes'),actions});
+  $('meeting-dialog').close();await refreshMeetings();notice('Meeting saved.');
+});});
+$('work-table').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-work-review]');if(!b)return;
+  const note=prompt('Supervisor note (optional):','');if(note===null)return;
+  await api('/api/work-reports/'+b.dataset.workReview,'PATCH',{supervisor_note:note,verify:true});
+  await refreshWork();notice('Work report reviewed.');
+}));
+$('issues-table').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-issue-resolve]');if(!b)return;
+  const resolution=prompt('Resolution / corrective action:','');if(resolution===null||!resolution.trim())return;
+  await api('/api/issues/'+b.dataset.issueResolve,'PATCH',{status:'Resolved',resolution});
+  await refreshIssues();notice('Problem marked resolved.');
+}));
+$('meetings-list').addEventListener('click',e=>perform(async()=>{
+  const b=e.target.closest('[data-action-update]');if(!b)return;
+  const choices=['Open','In Progress','Completed','Closed'];const current=b.dataset.current;
+  const next=prompt('Status: Open, In Progress, Completed or Closed',current);if(next===null)return;
+  if(!choices.includes(next))throw new Error('Use one of: '+choices.join(', '));
+  await api('/api/meeting-actions/'+b.dataset.actionUpdate,'PATCH',{status:next});await refreshMeetings();notice('Meeting action updated.');
+}));
+
 $('add-employee').addEventListener('click',()=>{const f=$('employee-form');f.reset();$('employee-id').value='';$('employee-dialog-title').textContent='Add employee';$('employee-dialog-note').textContent='Create an employee with a private 4-digit PIN.';$('pin-label').hidden=false;$('pin-help').hidden=false;$('employee-save').textContent='Create employee';f.elements.pin.required=true;$('employee-dialog').showModal();});
 $('employee-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
   const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;
-  try{const data=Object.fromEntries(new FormData($('employee-form'))),id=data.employee_id;delete data.employee_id;if(id){delete data.pin;await api('/api/employees/'+id,'PATCH',data);notice('Employee details updated.');}else{await api('/api/employees','POST',data);notice('Employee created. Register their face next.');}$('employee-dialog').close();await refreshEmployees();}finally{button.disabled=false;}
+  try{const data=Object.fromEntries(new FormData($('employee-form'))),id=data.employee_id;delete data.employee_id;if(id){delete data.pin;await api('/api/employees/'+id,'PATCH',data);notice('Employee details updated.');}else{await api('/api/employees','POST',data);notice('Employee created.');}$('employee-dialog').close();await refreshEmployees();}finally{button.disabled=false;}
 });});
 $('employee-table').addEventListener('click',e=>perform(async()=>{
-  const button=e.target.closest('button');if(!button)return;const id=Number(button.dataset.enrol||button.dataset.toggle||button.dataset.edit||button.dataset.pin||button.dataset.resetbio||button.dataset.resetface||button.dataset.delete),employee=team.find(p=>p.id===id);if(!employee)return;
-  if(button.dataset.enrol){await startCamera({employee});return;}
+  const button=e.target.closest('button');if(!button)return;
+  const id=Number(button.dataset.toggle||button.dataset.edit||button.dataset.pin||button.dataset.delete||button.dataset.file),employee=team.find(p=>p.id===id);if(!employee)return;
+  if(button.dataset.file){const data=await api('/api/employee-files/'+id),f=$('employee-file-form');f.reset();f.elements.employee_id.value=id;for(const k of ['designation','joining_date','skills','notes'])f.elements[k].value=data.profile[k]||'';$('employee-file-title').textContent=employee.name+' · '+employee.code;$('employee-recent-work').innerHTML='<h3>Recent work</h3>'+(data.recent_work.map(x=>`<p>${escapeHTML(x.date)} · ${escapeHTML(x.job_no||'General')} · ${escapeHTML(x.status)}<br>${escapeHTML(x.details)}</p>`).join('')||'<p>No work reports yet.</p>');await loadEmployeeDocuments(id);$('employee-file-dialog').showModal();return;}
   if(button.dataset.edit){const f=$('employee-form');f.reset();$('employee-id').value=employee.id;f.elements.name.value=employee.name;f.elements.code.value=employee.code.toUpperCase();f.elements.department.value=employee.department;$('employee-dialog-title').textContent='Edit employee';$('employee-dialog-note').textContent='Change employee identity or department.';$('pin-label').hidden=true;$('pin-help').hidden=true;f.elements.pin.required=false;$('employee-save').textContent='Save changes';$('employee-dialog').showModal();return;}
   if(button.dataset.pin){const pin=prompt(`Enter a new 4-digit PIN for ${employee.name}:`);if(pin===null)return;if(!/^\d{4}$/.test(pin))throw new Error('PIN must be exactly 4 digits.');await api('/api/employees/'+employee.id+'/reset-pin','POST',{pin});notice('Employee PIN reset.');return;}
-  if(button.dataset.resetface){if(!confirm(`Remove the registered attendance face for ${employee.name}?`))return;await api('/api/employees/'+employee.id+'/reset-face','POST',{});await refreshEmployees();notice('Attendance face removed.');return;}
-  if(button.dataset.resetbio){if(!confirm(`Remove all biometric/passkey logins for ${employee.name}? They can register again after signing in with their PIN.`))return;await api('/api/employees/'+employee.id+'/reset-biometric','POST',{});await refreshEmployees();notice('Biometric login reset.');return;}
   if(button.dataset.toggle){if(!confirm(`${employee.active?'Deactivate':'Activate'} ${employee.name}'s account?`))return;await api('/api/employees/'+employee.id+'/active','POST',{active:!employee.active});await refreshEmployees();notice('Employee access updated.');return;}
-  if(button.dataset.delete){if(!confirm(`Permanently remove ${employee.name}, including their attendance history and saved biometric credentials?`))return;await api('/api/employees/'+employee.id,'DELETE',{});await refreshEmployees();notice('Employee removed.');}
+  if(button.dataset.delete){if(!confirm(`Permanently remove ${employee.name}, including their attendance history?`))return;await api('/api/employees/'+employee.id,'DELETE',{});await refreshEmployees();notice('Employee removed.');}
 }));
 document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
 function stopCamera(){cameraRun++;if(stream)stream.getTracks().forEach(track=>track.stop());stream=null;$('video').srcObject=null;}
@@ -142,7 +478,18 @@ async function startCamera(mode){
     $('camera-status').textContent='Camera ready. Keep your face inside the guide.';$('capture-button').textContent=mode.employee?'Capture and register':'Capture and verify';$('capture-button').disabled=false;
   }catch(e){$('camera-status').textContent=e.name==='NotAllowedError'?'Camera permission denied. Allow camera access in your browser settings.':e.message;stopCamera();}
 }
-$('start-attendance').addEventListener('click',()=>perform(async()=>{await refreshMine();if(!$('start-attendance').disabled)await startCamera({action:openShift?'out':'in'});}));
+$('start-attendance').addEventListener('click',()=>perform(async()=>{
+  await refreshMine();
+  if($('start-attendance').disabled)return;
+  const action=openShift?'out':'in', button=$('start-attendance');
+  button.disabled=true;
+  try{
+    const location=await getLocation();
+    await api('/api/attendance','POST',{location,action});
+    await refreshMine();
+    notice(action==='in'?'Checked in successfully.':'Checked out successfully.');
+  }finally{button.disabled=false;}
+}));
 function getLocation(){return new Promise((resolve,reject)=>{
   if(!navigator.geolocation)return reject(new Error('Location is not supported by this browser.'));
   navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,timestamp:p.timestamp}),()=>reject(new Error('Unable to get location. Allow location access, enable GPS, and try again.')),{enableHighAccuracy:true,timeout:20000,maximumAge:0});

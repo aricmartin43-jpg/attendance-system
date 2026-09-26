@@ -16,6 +16,7 @@ os.environ['DATABASE_URL'] = 'sqlite:///' + tempfile.mktemp(suffix='.db')
 os.environ['SECRET_KEY'] = 'test-secret-' * 8
 os.environ['FACE_ENCRYPTION_KEY'] = Fernet.generate_key().decode()
 os.environ['ADMIN_PASSWORD'] = 'testing-admin-password'
+os.environ['ADMIN_PIN'] = '9876'
 import app as module
 from init_db import initialise
 
@@ -31,7 +32,7 @@ def database(monkeypatch):
     monkeypatch.setattr(module, 'remove_photo', lambda value: None)
 
 
-def client(code='admin', password='testing-admin-password'):
+def client(code='admin', password='9876'):
     c = module.app.test_client()
     token = c.get('/api/session').json['csrf']
     response = c.post('/api/login', json=dict(code=code, password=password), headers={'X-CSRF-Token':token})
@@ -67,6 +68,107 @@ def test_authentication_csrf_and_roles():
     assert worker.get('/api/employees').status_code == 403
     assert worker.get('/api/export?month=2026-09').status_code == 403
     assert post(worker, f'/api/employees/{eid}/enrol', dict(photo='fake',consent=True)).status_code == 403
+
+
+def test_customer_and_contact_edits_preserve_history_and_permissions():
+    admin = client()
+    created_worker = post(admin, '/api/employees', dict(code='ces001', name='Worker', department='Production', pin='1234'))
+    assert created_worker.status_code == 201
+    worker = client('ces001', '1234')
+    created = post(admin, '/api/customers', {'name':'Original Co'}).json
+    cid = created['id']
+    contact = post(admin, f'/api/customers/{cid}/contacts', {'name':'Original Person'}).json['id']
+    patch = lambda c,path,data: c.patch(path,json=data,headers={'X-CSRF-Token':c.csrf})
+    assert patch(worker,f'/api/customers/{cid}',{'name':'Intruder'}).status_code == 403
+    assert patch(admin,f'/api/customers/{cid}',{'name':'','status':'Archived'}).status_code == 400
+    assert patch(admin,f'/api/customers/{cid}',{'name':'Updated Co','status':'Archived'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact}',{'name':'Updated Person'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact+999}',{'name':'Wrong'}).status_code == 404
+    detail = admin.get(f'/api/customers/{cid}').json
+    assert detail['name']=='Updated Co' and detail['status']=='Archived'
+    assert detail['contacts'][0]['name']=='Updated Person'
+    with module.DB() as db:
+        actions=[row.action for row in db.scalars(module.select(module.AuditLog)).all()]
+    assert 'update_customer' in actions and 'update_customer_contact' in actions
+
+
+def test_inventory_purchase_receipt_and_stock_ledger():
+    admin=client()
+    item=post(admin,'/api/stock-items',{'sku':'CR-2MM','name':'2 mm CR sheet','unit':'kg','reorder_level':'10'}).json
+    supplier=post(admin,'/api/suppliers',{'name':'Steel Supplier'}).json
+    po=post(admin,'/api/purchase-orders',{'supplier_id':supplier['id'],'item_id':item['id'],
+                                          'ordered_qty':'20','unit_price':'80'}).json
+    receive=post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'12'})
+    assert receive.status_code==200 and receive.json['status']=='Part received'
+    assert post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'9'}).status_code==409
+    issue=post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'4','reason':'Laser cutting'})
+    assert issue.status_code==201 and issue.json['balance']=='8.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'9','reason':'Too much'}).status_code==409
+    rows=admin.get(f'/api/stock-items/{item["id"]}/movements').json
+    assert len(rows)==2 and rows[0]['balance']=='8.000'
+    assert admin.get('/api/stock-items').json[0]['quantity']=='8.000'
+
+
+def test_employee_file_production_maintenance_and_summary():
+    admin=client()
+    employee_id=post(admin,'/api/employees',{'code':'CES010','name':'Siva','department':'Design','pin':'1234'}).json['id']
+    patch=lambda path,data: admin.patch(path,json=data,headers={'X-CSRF-Token':admin.csrf})
+    assert patch(f'/api/employee-files/{employee_id}',{'designation':'Designer','skills':'SolidWorks'}).status_code==200
+    assert admin.get(f'/api/employee-files/{employee_id}').json['profile']['skills']=='SolidWorks'
+    customer=post(admin,'/api/customers',{'name':'Machine Builder'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Telescopic cover'}).json
+    step=post(admin,'/api/production-steps',{'work_order_id':job['id'],'operation':'Laser cutting','sequence':1}).json
+    assert patch(f'/api/production-steps/{step["id"]}',{'status':'Blocked','delay_reason':'Sheet shortage'}).status_code==200
+    asset=post(admin,'/api/company-assets',{'code':'BIKE-01','kind':'Bike','name':'Service bike'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Service','description':'Oil change'}).json
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Completed','cost':'800','downtime_hours':'2'}).status_code==200
+    summary=admin.get('/api/management-summary').json
+    assert summary['open_jobs']==1 and summary['blocked_steps']==1 and summary['open_maintenance']==0
+
+
+def test_quote_to_job_material_reservation_and_drawing_approval():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    quote=post(admin,'/api/quotations',{'customer_id':customer['id'],'title':'Machine cover','amount':'12000'}).json
+    assert quote['code'].startswith('QT-')
+    accepted=post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'BFW-123'})
+    assert accepted.status_code==201
+    job_id=accepted.json['work_order']['id']
+    assert post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'DUP'}).status_code==409
+    item=post(admin,'/api/stock-items',{'sku':'CR-SHEET','name':'CR sheet','unit':'kg'}).json
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Receive','quantity':'10','reason':'Initial stock'}).status_code==201
+    req=post(admin,f'/api/work-orders/{job_id}/materials',{'item_id':item['id'],'required_qty':'8'}).json
+    assert post(admin,f'/api/job-materials/{req["id"]}/reserve',{'quantity':'8'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['available']=='2.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'3','reason':'Generic issue'}).status_code==409
+    assert post(admin,f'/api/job-materials/{req["id"]}/issue',{'quantity':'5'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['quantity']=='5.000'
+    drawing1=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'A','file_reference':'internal/CES-01-A.pdf'}).json
+    drawing2=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'B','file_reference':'internal/CES-01-B.pdf'}).json
+    assert post(admin,f'/api/drawings/{drawing1["id"]}/approve',{}).status_code==200
+    assert post(admin,f'/api/drawings/{drawing2["id"]}/approve',{}).status_code==200
+    drawings=admin.get(f'/api/work-orders/{job_id}/drawings').json
+    assert sum(d['approved'] for d in drawings)==1 and drawings[0]['revision']=='B'
+
+
+def test_private_documents_job_card_quality_and_dispatch():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Cover'}).json
+    jid=job['id']
+    worker_id=post(admin,'/api/employees',{'code':'CES011','name':'Worker','department':'Production','pin':'1234'}).json['id']
+    worker=client('CES011','1234')
+    data={'file':(io.BytesIO(b'%PDF-1.4\nsmall test document'),'drawing.pdf')}
+    uploaded=admin.post(f'/api/documents/job/{jid}',data=data,content_type='multipart/form-data',headers={'X-CSRF-Token':admin.csrf})
+    assert uploaded.status_code==201
+    doc_id=uploaded.json['id']
+    assert worker.get(f'/api/documents/download/{doc_id}').status_code==403
+    assert admin.get(f'/api/documents/download/{doc_id}').data.startswith(b'%PDF-')
+    assert str(jid).encode() in admin.get(f'/api/work-orders/{jid}/job-card').data
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
+    assert post(admin,f'/api/work-orders/{jid}/quality',{'operation':'Final','inspected_qty':'5','accepted_qty':'4','rejected_qty':'1'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'4','dispatch_date':'2026-09-26'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
 
 
 def test_shift_rules_and_record_isolation():

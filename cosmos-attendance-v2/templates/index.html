@@ -2,31 +2,38 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cosmos Attendance</title>
-  <meta name="description" content="Employee attendance for Cosmos Engineering Solutions.">
+  <title>Cosmos Workspace</title>
+  <meta name="description" content="The operations workspace for Cosmos Engineering Solutions.">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/workspace.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-layout">
     <aside class="brand-panel">
       <div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>ENGINEERING SOLUTIONS</small></span></div>
-      <div class="brand-story"><span class="eyebrow">PEOPLE · PRECISION · PROGRESS</span><h1>Every day.<br>Every contribution.</h1><p>Your work starts here. Secure attendance for the people who keep Cosmos moving.</p><div class="brand-rule"></div><span class="brand-caption">ATTENDANCE / EMPLOYEE PORTAL</span></div>
+      <div class="brand-story"><span class="eyebrow">THE COSMOS WORKSPACE</span><h1>Good work.<br>Built together.</h1><p>From the first enquiry to the final delivery. Your people, production and progress, connected.</p><div class="brand-rule"></div><span class="brand-caption">INNOVATE. ENGINEER. EXCEL.</span></div>
       <p class="brand-footer">Cosmos Engineering Solutions · Coimbatore</p>
     </aside>
-    <main class="login-main"><div class="login-card"><span class="eyebrow accent">COSMOS ATTENDANCE</span><h2>Welcome to work.</h2><p class="muted">Sign in to mark your attendance or manage your team.</p>
-      <form id="login-form"><label>Employee ID<input id="login-code" name="code" autocomplete="username" required placeholder="e.g. CES001"></label><label>PIN / Admin password<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required placeholder="4-digit employee PIN"></label><button type="submit" class="primary wide">Sign in with PIN <span aria-hidden="true">→</span></button></form>
-      <button type="button" class="secondary wide" id="biometric-login">Use phone biometric / passkey</button>
-      <p class="help">Employees use a 4-digit PIN or a registered biometric. Administrators keep a strong password.</p><div class="login-note"><span class="mini-icon">◎</span><p>Your fingerprint or Face ID stays on your device. Cosmos stores only a WebAuthn credential.</p></div>
+    <main class="login-main"><div class="login-card"><span class="eyebrow accent">YOUR WORKDAY, CONNECTED</span><h2>Welcome back.</h2><p class="muted">Sign in to your Cosmos workspace.</p>
+      <form id="login-form"><label>Employee ID<input id="login-code" name="code" autocomplete="username" required placeholder="e.g. CES001"></label><label>4-digit PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="current-password" required placeholder="Enter your PIN"></label><button type="submit" class="primary wide">Open workspace <span aria-hidden="true">→</span></button></form>
+      <p class="help">Use your assigned employee ID and 4-digit PIN.</p><div class="login-note"><span class="mini-icon">◎</span><p>Need help signing in? Contact your administrator.</p></div>
     </div></main>
   </div>
 
   <div id="app-view" class="app-layout" hidden>
-    <aside class="sidebar"><div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>ATTENDANCE</small></span></div><span class="nav-label">WORKSPACE</span><nav id="navigation" aria-label="Main navigation"></nav><div class="sidebar-bottom"><div class="workspace-badge">CE</div><div>Cosmos Engineering<small>Solutions · Coimbatore</small></div></div></aside>
-    <div class="workspace"><header class="topbar"><span id="breadcrumb">Attendance</span><div class="account"><span id="account-name"></span><button class="text-button" id="logout">Sign out</button></div></header>
+    <aside class="sidebar" id="workspace-sidebar"><div class="brand"><span class="brand-mark">C</span><span>COSMOS<small>OPERATIONS WORKSPACE</small></span><button id="close-navigation" class="icon-button mobile-only" aria-label="Close navigation">×</button></div><label class="nav-search"><span class="sr-only">Find a module</span><input id="module-search" type="search" placeholder="Find a module…" autocomplete="off"></label><nav id="navigation" aria-label="Main navigation"></nav><p id="nav-no-results" class="muted" hidden>No matching modules</p><div class="sidebar-bottom"><div class="workspace-badge">CE</div><div>Cosmos Engineering<small>Coimbatore · India</small></div></div></aside>
+    <button id="navigation-backdrop" aria-label="Close navigation" hidden></button>
+    <div class="workspace"><header class="topbar"><div class="topbar-location"><button id="open-navigation" class="icon-button mobile-only" aria-label="Open navigation" aria-controls="workspace-sidebar" aria-expanded="false">☰</button><span class="topbar-company">Workspace</span><span class="breadcrumb-divider">/</span><span id="breadcrumb">Overview</span></div><div class="account"><span class="account-avatar" id="account-avatar" aria-hidden="true">C</span><span id="account-name"></span><button class="text-button" id="logout">Sign out</button></div></header>
     <main class="content">
       <div class="page-heading"><div><span class="eyebrow accent">COSMOS ENGINEERING SOLUTIONS</span><h1 id="page-title">Attendance overview</h1><p id="page-subtitle" class="muted">A clear view of your team's working day.</p></div><div class="date-badge" id="today-label"></div></div>
+      <section id="home-panel" class="panel-view" hidden>
+        <div class="home-intro"><div><span class="eyebrow">TODAY AT COSMOS</span><h2>Keep the work moving.</h2><p>See what needs attention and take the next step.</p></div><div class="home-actions"><button class="primary" data-home-action="quote">+ New quotation</button><button class="secondary" data-home-action="job">+ Work order</button></div></div>
+        <div id="home-metrics" class="stats"></div>
+        <div class="home-grid"><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRIORITIES</span><h2>Needs your attention</h2></div><span class="subtle-tag">Live records</span></div><div id="home-attention"></div></article><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">QUOTE TO DELIVERY</span><h2>Work in progress</h2></div></div><div id="home-flow"></div><p class="card-footnote">Counts represent records at each stage, not a single conversion funnel.</p></article></div>
+        <article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRODUCTION</span><h2>Upcoming work orders</h2></div><button class="text-button" data-jump="jobs">View all work orders →</button></div><div id="home-jobs"></div></article>
+      </section>
 
       <section id="overview-panel" class="panel-view" hidden>
         <div class="stats"><article class="stat"><span>Active employees</span><strong id="stat-total">0</strong><small>Registered team members</small></article><article class="stat"><span>Checked in</span><strong id="stat-in">0</strong><small>Attendance recorded today</small></article><article class="stat"><span>At work</span><strong id="stat-working">0</strong><small>Open shifts from today</small></article><article class="stat"><span>Not checked in</span><strong id="stat-away">0</strong><small>Active team, no check-in today</small></article></div>
@@ -34,16 +41,165 @@
         <div class="quiet-banner"><span class="mini-icon">◎</span><div><strong>Attendance from anywhere</strong><p>GPS is recorded at each check-in and check-out. No factory boundary restrictions.</p></div></div>
       </section>
 
-      <section id="employees-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Your team</h2><p class="muted">Add, edit, remove, reset PIN/biometrics and manage face access.</p></div><button class="primary" id="add-employee">+ Add employee</button></div><div id="employee-table"></div></div></section>
+      <section id="employees-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Your team</h2><p class="muted">Add, edit, remove, reset PIN and manage employee access.</p></div><button class="primary" id="add-employee">+ Add employee</button></div><div id="employee-table"></div></div></section>
 
       <section id="reports-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Monthly attendance</h2><p class="muted">Download a CSV for Excel or Google Sheets.</p></div><div class="report-controls"><label class="compact-label">Month<input type="month" id="month-filter"></label><button class="primary" id="export">↓ Export CSV</button></div></div><div id="monthly-table"></div></div><p class="help">Hours include the full time between check-in and check-out. Break deductions and payroll calculations are not included.</p></section>
 
-      <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Mark attendance</button><button class="secondary wide" id="register-biometric">Set up / add biometric login</button><div class="steps"><span>01 · Camera</span><span>02 · Location</span><span>03 · Verify</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A moment to check in.</h2><ol><li><strong>Face the camera</strong><p>Use good lighting. Only your face should be visible.</p></li><li><strong>Allow location access</strong><p>Work from any location. GPS is saved with your attendance.</p></li><li><strong>Capture and confirm</strong><p>Your face is checked against your registered photo before attendance is saved.</p></li></ol><p class="help">Photos are stored privately. Location is collected only when you submit attendance.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
-    </main><footer class="app-footer">COSMOS ATTENDANCE <span>Company time zone: <span id="timezone-label">Asia/Kolkata</span></span></footer></div>
+      <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Mark attendance with GPS</button><div class="steps"><span>01 · Login</span><span>02 · GPS</span><span>03 · Record</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A simple secure check-in.</h2><ol><li><strong>Sign in securely</strong><p>Use your employee ID and 4-digit PIN.</p></li><li><strong>Allow location access</strong><p>GPS is captured only when you check in or check out.</p></li><li><strong>Confirm attendance</strong><p>Your signed-in employee account and current GPS location are recorded.</p></li></ol><p class="help">Face recognition is disabled. No attendance photo is required.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
+
+      <section id="ecosystem-panel" class="panel-view" hidden>
+        <div class="stats">
+          <article class="stat"><span>Work reports</span><strong id="eco-work">0</strong><small>Recorded company memory</small></article>
+          <article class="stat"><span>Completed work</span><strong id="eco-completed">0</strong><small>Marked completed</small></article>
+          <article class="stat"><span>Open problems</span><strong id="eco-issues">0</strong><small>Need resolution</small></article>
+          <article class="stat"><span>Meeting actions</span><strong id="eco-actions">0</strong><small>Still open</small></article>
+        </div>
+        <div class="ecosystem-grid">
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">WORK MEMORY</span><h2>Daily work & jobs</h2><p class="muted">Capture what was done, for which job/customer, machine involved, difficulties and status.</p><button class="secondary" data-jump="work">Open daily work</button></article>
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">PROBLEM MEMORY</span><h2>Problems & resolutions</h2><p class="muted">Record material, machine, drawing, customer and process problems and how they were resolved.</p><button class="secondary" data-jump="issues">Open problems</button></article>
+          <article class="section-card ecosystem-card"><span class="eyebrow accent">MEETING MEMORY</span><h2>Meetings & actions</h2><p class="muted">Keep decisions, owners, due dates and completion status searchable.</p><button class="secondary" data-jump="meetings">Open meetings</button></article>
+        </div>
+      </section>
+
+
+      <section id="customers-panel" class="panel-view" hidden>
+        <div class="section-card">
+          <div class="section-heading"><div><h2>Customer database</h2><p class="muted">Companies, important contacts, machines, jobs and service history in one place.</p></div><button class="primary" id="add-customer">+ Add customer</button></div>
+          <div class="network-search"><input id="network-search" placeholder="Search customer, machine, work order or employee..."><div id="network-results"></div></div>
+          <div id="customer-table"></div>
+        </div>
+        <div id="customer-detail"></div>
+      </section>
+
+      <section id="machines-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Customer machines</h2><p class="muted">Every machine gets its own permanent Cosmos ID and service history.</p></div><button class="primary" id="add-machine">+ Add machine</button></div><div id="machine-table"></div></div>
+        <div id="machine-history"></div>
+      </section>
+
+      <section id="jobs-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Work orders</h2><p class="muted">Customer work linked to machine, owner, assigned employees, supervisor and approval.</p></div><button class="primary" id="add-job">+ Create work order</button></div><div id="job-table"></div></div>
+      </section>
+      <section id="quotations-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Quotations</h2><p class="muted">Follow up enquiries and convert an accepted quote into a work order.</p></div><button class="primary" id="add-quotation">+ Quotation</button></div><div id="quotation-table"></div></div></section>
+      <section id="job-files-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Job file</h2><p class="muted">Materials, drawings, inspection, documents and dispatch in one place.</p></div><button class="secondary" id="print-job-card">Print QR job card</button></div><label>Work order<select id="job-file-select"></select></label><div class="action-buttons"><button class="secondary" id="add-job-material">+ Material</button><button class="secondary" id="add-job-drawing">+ Drawing revision</button><button class="secondary" id="upload-job-document">+ Document</button><button class="secondary" id="add-quality">+ Quality check</button><button class="primary" id="add-dispatch">+ Dispatch</button></div><div id="job-material-table"></div><div id="job-drawing-table"></div><div id="job-documents"></div><div id="job-quality"></div><div id="job-dispatch"></div></div></section>
+
+      <section id="inventory-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Inventory</h2><p class="muted">Stock on hand, reorder levels and a complete movement history.</p></div><button class="primary" id="add-stock-item">+ Add item</button></div><div id="stock-table"></div></div>
+        <div id="stock-history"></div>
+      </section>
+
+      <section id="purchasing-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Purchasing</h2><p class="muted">Supplier records, purchase orders and partial receipts.</p></div><div class="action-buttons"><button class="secondary" id="add-supplier">+ Supplier</button><button class="primary" id="add-purchase-order">+ Purchase order</button></div></div><div id="supplier-table"></div><div id="purchase-table"></div></div>
+      </section>
+
+      <section id="production-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Production planning</h2><p class="muted">Plan and track each operation against its work order.</p></div><button class="primary" id="add-production-step">+ Operation</button></div><div id="production-table"></div></div></section>
+      <section id="maintenance-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Maintenance</h2><p class="muted">Company bikes and machines, planned service and breakdowns.</p></div><div class="action-buttons"><button class="secondary" id="add-asset">+ Asset</button><button class="primary" id="add-maintenance-task">+ Task</button></div></div><div id="asset-table"></div><div id="maintenance-table"></div></div></section>
+      <section id="analytics-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Management summary</h2><p class="muted">Live counts from jobs, stock, production and maintenance.</p></div><button class="secondary" id="refresh-analytics">Refresh</button></div><div id="analytics-content" class="stats"></div></div></section>
+
+      <section id="work-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Daily work reports</h2><p class="muted">A permanent record of completed work, jobs, machines and difficulties.</p></div><button class="primary" id="add-work">+ Add work report</button></div><div id="work-table"></div></div>
+      </section>
+
+      <section id="issues-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Problems & difficulties</h2><p class="muted">Report blockers early and preserve the resolution for future jobs.</p></div><button class="primary" id="add-issue">+ Report problem</button></div><div id="issues-table"></div></div>
+      </section>
+
+      <section id="meetings-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Meetings & actions</h2><p class="muted">Decisions and assigned actions stay linked to responsible employees.</p></div><button class="primary" id="add-meeting">+ Create meeting</button></div><div id="meetings-list"></div></div>
+      </section>
+    </main><footer class="app-footer">COSMOS WORKSPACE <span>Company time zone: <span id="timezone-label">Asia/Kolkata</span></span></footer></div>
   </div>
 
   <dialog id="employee-dialog"><form id="employee-form"><input type="hidden" name="employee_id" id="employee-id"><div class="dialog-header"><h2 id="employee-dialog-title">Add employee</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="employee-dialog-note">Create an employee with a private 4-digit PIN.</p><label>Full name<input name="name" required maxlength="100" autocomplete="name"></label><label>Employee ID<input name="code" required maxlength="40" pattern="[a-zA-Z0-9_-]+" placeholder="CES001"></label><label>Department<select name="department"><option>Production</option><option>Laser</option><option>Service</option><option>Design</option><option>Administration</option><option>Other</option></select></label><label id="pin-label">Initial 4-digit PIN<input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" autocomplete="new-password"></label><p class="help" id="pin-help">Use exactly 4 digits. The employee can later add phone biometric login.</p><button class="primary wide" id="employee-save" type="submit">Create employee</button></form></dialog>
 
+  <dialog id="stock-dialog"><form id="stock-form"><input name="item_id" type="hidden"><div class="dialog-header"><h2>Stock item</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><div class="form-grid"><label>SKU<input name="sku" required maxlength="60"></label><label>Name<input name="name" required maxlength="180"></label></div><div class="form-grid"><label>Category<select name="category"><option>Raw material</option><option>Components</option><option>Consumables</option><option>Spares</option><option>Finished goods</option></select></label><label>Unit<input name="unit" required value="pcs" maxlength="20"></label></div><label>Specification<textarea name="specification" maxlength="5000" placeholder="Grade, thickness, sheet size or part details"></textarea></label><div class="form-grid"><label>Rack / location<input name="location" maxlength="100"></label><label>Reorder level<input name="reorder_level" type="number" min="0" step="0.001" value="0"></label></div><button class="primary wide">Save item</button></form></dialog>
+  <dialog id="movement-dialog"><form id="movement-form"><input name="item_id" type="hidden"><div class="dialog-header"><h2>Stock movement</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Type<select name="kind"><option>Receive</option><option>Issue</option><option>Return</option><option>Adjust</option></select></label><div class="form-grid"><label>Quantity (signed for adjustment)<input name="quantity" type="number" step="0.001" required></label><label>Reference<input name="reference" maxlength="100"></label></div><label>Work order ID (optional)<input name="work_order_id" type="number" min="1"></label><label>Reason<input name="reason" required maxlength="500"></label><button class="primary wide">Record movement</button></form></dialog>
+  <dialog id="supplier-dialog"><form id="supplier-form"><div class="dialog-header"><h2>Add supplier</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Name<input name="name" required maxlength="180"></label><div class="form-grid"><label>Contact<input name="contact" maxlength="120"></label><label>Phone<input name="phone" maxlength="40"></label></div><div class="form-grid"><label>Email<input name="email" type="email" maxlength="160"></label><label>GSTIN<input name="gstin" maxlength="30"></label></div><button class="primary wide">Save supplier</button></form></dialog>
+  <dialog id="purchase-dialog"><form id="purchase-form"><div class="dialog-header"><h2>Create purchase order</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Supplier<select name="supplier_id" required></select></label><label>Stock item<select name="item_id" required></select></label><div class="form-grid"><label>Ordered quantity<input name="ordered_qty" type="number" min="0.001" step="0.001" required></label><label>Unit price ₹<input name="unit_price" type="number" min="0" step="0.01" value="0"></label></div><label>Expected date<input name="expected_date" type="date"></label><button class="primary wide">Create PO</button></form></dialog>
+  <dialog id="employee-file-dialog"><form id="employee-file-form"><input name="employee_id" type="hidden"><div class="dialog-header"><h2 id="employee-file-title">Employee file</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><div class="form-grid"><label>Designation<input name="designation" maxlength="100"></label><label>Joining date<input name="joining_date" type="date"></label></div><label>Skills and authorised work<textarea name="skills" maxlength="5000"></textarea></label><label>Management notes<textarea name="notes" maxlength="5000"></textarea></label><button class="primary wide">Save file</button><button class="secondary" type="button" id="upload-employee-document">+ Upload document</button><div id="employee-documents"></div><div id="employee-recent-work"></div></form></dialog>
+  <dialog id="production-dialog"><form id="production-form"><div class="dialog-header"><h2>Plan operation</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Work order<select name="work_order_id" required></select></label><div class="form-grid"><label>Sequence<input name="sequence" type="number" min="1" value="1" required></label><label>Operation<select name="operation"><option>Design</option><option>Laser cutting</option><option>Bending</option><option>Welding</option><option>Finishing</option><option>Coating</option><option>Assembly</option><option>Inspection</option><option>Dispatch</option></select></label></div><div class="form-grid"><label>Planned date<input name="planned_date" type="date"></label><label>Planned hours<input name="planned_hours" type="number" min="0" step="0.01" value="0"></label></div><button class="primary wide">Add operation</button></form></dialog>
+  <dialog id="asset-dialog"><form id="asset-form"><div class="dialog-header"><h2>Add company asset</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><div class="form-grid"><label>Asset code<input name="code" required maxlength="60"></label><label>Kind<select name="kind"><option>Machine</option><option>Bike</option></select></label></div><label>Name<input name="name" required maxlength="160"></label><div class="form-grid"><label>Model<input name="model" maxlength="120"></label><label>Serial / registration<input name="serial_or_registration" maxlength="100"></label></div><div class="form-grid"><label>Location<input name="location" maxlength="100"></label><label>Next service<input name="next_service_date" type="date"></label></div><button class="primary wide">Save asset</button></form></dialog>
+  <dialog id="maintenance-dialog"><form id="maintenance-form"><div class="dialog-header"><h2>Maintenance task</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Asset<select name="asset_id" required></select></label><div class="form-grid"><label>Type<select name="task_type"><option>Preventive service</option><option>Breakdown</option><option>Repair</option><option>Inspection</option></select></label><label>Due date<input name="due_date" type="date"></label></div><label>Description<textarea name="description" required maxlength="5000"></textarea></label><button class="primary wide">Create task</button></form></dialog>
+  <dialog id="quotation-dialog"><form id="quotation-form"><div class="dialog-header"><h2>New quotation</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Customer<select name="customer_id" required></select></label><label>Job title<input name="title" required maxlength="180"></label><label>Scope / description<textarea name="description" maxlength="5000"></textarea></label><div class="form-grid"><label>Quoted amount ₹<input name="amount" type="number" min="0" step="0.01" value="0"></label><label>Follow up date<input name="follow_up_date" type="date"></label></div><label>Promised delivery date<input name="promised_date" type="date"></label><button class="primary wide">Save quotation</button></form></dialog>
+  <dialog id="job-material-dialog"><form id="job-material-form"><div class="dialog-header"><h2>Add job material</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Stock item<select name="item_id" required></select></label><label>Required quantity<input name="required_qty" type="number" min="0.001" step="0.001" required></label><button class="primary wide">Add material</button></form></dialog>
+  <dialog id="drawing-dialog"><form id="drawing-form"><div class="dialog-header"><h2>Drawing revision</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><div class="form-grid"><label>Drawing number<input name="drawing_no" required maxlength="100"></label><label>Revision<input name="revision" required maxlength="30"></label></div><label>File reference / approved storage link<input name="file_reference" required maxlength="500"></label><label>Notes<textarea name="notes" maxlength="5000"></textarea></label><button class="primary wide">Add revision</button></form></dialog>
+  <dialog id="document-dialog"><form id="document-form"><input name="owner_type" type="hidden"><input name="owner_id" type="hidden"><div class="dialog-header"><h2>Upload private document</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>PDF, image, DXF, DWG or STEP (maximum 2 MB)<input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.dxf,.dwg,.step,.stp" required></label><button class="primary wide">Upload</button></form></dialog>
+  <dialog id="quality-dialog"><form id="quality-form"><div class="dialog-header"><h2>Quality check</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><label>Operation<input name="operation" required maxlength="80" placeholder="Final inspection"></label><div class="form-grid"><label>Inspected<input name="inspected_qty" type="number" step="0.001" min="0.001" required></label><label>Accepted<input name="accepted_qty" type="number" step="0.001" min="0" required></label><label>Rejected<input name="rejected_qty" type="number" step="0.001" min="0" value="0" required></label></div><label>Defect / rework notes<textarea name="defect" maxlength="5000"></textarea></label><button class="primary wide">Record inspection</button></form></dialog>
+  <dialog id="dispatch-dialog"><form id="dispatch-form"><div class="dialog-header"><h2>Dispatch accepted work</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div><div class="form-grid"><label>Dispatch date<input name="dispatch_date" type="date" required></label><label>Quantity<input name="quantity" type="number" min="0.001" step="0.001" required></label></div><div class="form-grid"><label>Transporter<input name="transporter" maxlength="120"></label><label>Tracking reference<input name="tracking_reference" maxlength="120"></label></div><div class="form-grid"><label>Delivery note<input name="delivery_note" maxlength="120"></label><label>Proof reference<input name="proof_reference" maxlength="500"></label></div><button class="primary wide">Record dispatch</button></form></dialog>
+
+
+
+  <dialog id="customer-dialog"><form id="customer-form"><input type="hidden" name="customer_id"><div class="dialog-header"><h2 id="customer-dialog-title">Add customer</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Company name<input name="name" required maxlength="180"></label>
+    <div class="form-grid"><label>GSTIN<input name="gstin" maxlength="30"></label><label>Industry<input name="industry" maxlength="100"></label></div>
+    <div class="form-grid"><label>Phone<input name="phone" maxlength="40"></label><label>Email<input name="email" type="email" maxlength="160"></label></div>
+    <label>Address<textarea name="address" rows="3" maxlength="5000"></textarea></label>
+    <label>Notes<textarea name="notes" rows="2" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Save customer</button>
+  </form></dialog>
+
+  <dialog id="contact-dialog"><form id="contact-form"><input type="hidden" name="customer_id" id="contact-customer-id"><input type="hidden" name="contact_id"><div class="dialog-header"><h2 id="contact-dialog-title">Add customer contact</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Name<input name="name" required maxlength="120"></label>
+    <div class="form-grid"><label>Designation<input name="designation" maxlength="120" placeholder="MD / Maintenance Manager"></label><label>Department<input name="department" maxlength="100"></label></div>
+    <div class="form-grid"><label>Phone<input name="phone" maxlength="40"></label><label>Email<input name="email" type="email" maxlength="160"></label></div>
+    <label class="checkbox-line"><input name="primary_contact" type="checkbox"> Primary contact</label>
+    <label>Notes<textarea name="notes" rows="2" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Save contact</button>
+  </form></dialog>
+
+  <dialog id="machine-dialog"><form id="machine-form"><div class="dialog-header"><h2>Add machine</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Customer<select name="customer_id" id="machine-customer" required></select></label>
+    <div class="form-grid"><label>Machine type<input name="machine_type" maxlength="120" placeholder="VMC / Turning / Grinding"></label><label>Customer machine No.<input name="customer_machine_no" maxlength="80" placeholder="VMC-02"></label></div>
+    <div class="form-grid"><label>Manufacturer<input name="manufacturer" maxlength="120"></label><label>Model<input name="model" maxlength="120"></label></div>
+    <div class="form-grid"><label>Serial No.<input name="serial_no" maxlength="120"></label><label>Controller<input name="controller" maxlength="120"></label></div>
+    <div class="form-grid"><label>Department<input name="department" maxlength="100"></label><label>Location<input name="location" maxlength="140"></label></div>
+    <label>Installation date<input name="installation_date" type="date"></label>
+    <label>Notes<textarea name="notes" rows="3" maxlength="5000"></textarea></label>
+    <button class="primary wide" type="submit">Create machine</button>
+  </form></dialog>
+
+  <dialog id="job-dialog"><form id="job-form"><div class="dialog-header"><h2>Create work order</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Customer<select name="customer_id" id="job-customer" required></select></label>
+    <label>Machine<select name="machine_id" id="job-machine"><option value="">General / no specific machine</option></select></label>
+    <div class="form-grid"><label>Work type<select name="work_type"><option>Service</option><option>Manufacturing</option><option>Repair</option><option>Installation</option><option>Inspection</option><option>Preventive Maintenance</option></select></label><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
+    <label>Job title<input name="title" maxlength="180" required placeholder="Telescopic cover repair"></label>
+    <label>Description<textarea name="description" rows="4" maxlength="8000"></textarea></label>
+    <div class="form-grid"><label>Job owner<select name="job_owner_id" id="job-owner"></select></label><label>Supervisor<select name="supervisor_id" id="job-supervisor"></select></label></div>
+    <label>Assigned employee<select name="assigned_employee_id" id="job-assigned"></select></label>
+    <div class="form-grid"><label>Start date<input name="start_date" type="date"></label><label>Target date<input name="target_date" type="date"></label></div>
+    <button class="primary wide" type="submit">Create work order</button>
+  </form></dialog>
+
+  <dialog id="work-dialog"><form id="work-form"><div class="dialog-header"><h2>Add work report</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label class="admin-employee-field">Employee<select name="employee_id" id="work-employee"></select></label>
+    <label>Work date<input type="date" name="date" id="work-date" required></label>
+    <label>Linked work order<select name="work_order_id" id="work-order-link"><option value="">Not linked</option></select></label>
+    <label>Linked machine<select name="machine_id" id="work-machine-link"><option value="">Not linked</option></select></label>
+    <div class="form-grid"><label>Job / Order No.<input name="job_no" maxlength="60" placeholder="e.g. JO-2026-0001"></label><label>Customer<input name="customer" maxlength="120"></label></div>
+    <label>Work details<textarea name="work_details" required maxlength="5000" rows="4" placeholder="Describe the work completed today..."></textarea></label>
+    <div class="form-grid"><label>Machine / Equipment<input name="machine" maxlength="120"></label><label>Status<select name="status"><option>Completed</option><option>In Progress</option><option>Blocked</option><option>Pending</option></select></label></div>
+    <label>Problems / difficulties<textarea name="problems" maxlength="5000" rows="3" placeholder="Material delay, drawing issue, machine problem, support needed..."></textarea></label>
+    <button class="primary wide" type="submit">Save work report</button>
+  </form></dialog>
+
+  <dialog id="issue-dialog"><form id="issue-form"><div class="dialog-header"><h2>Report a problem</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label class="admin-employee-field">Employee<select name="employee_id" id="issue-employee"></select></label>
+    <label>Date<input type="date" name="date" id="issue-date" required></label>
+    <label>Category<select name="category"><option>Machine</option><option>Material</option><option>Drawing</option><option>Customer</option><option>Quality</option><option>Safety</option><option>Process</option><option>Other</option></select></label>
+    <label>Problem title<input name="title" maxlength="160" required></label>
+    <label>Details<textarea name="detail" maxlength="5000" rows="5" required placeholder="What happened? What is blocked? What support is needed?"></textarea></label>
+    <button class="primary wide" type="submit">Submit problem</button>
+  </form></dialog>
+
+  <dialog id="meeting-dialog"><form id="meeting-form"><div class="dialog-header"><h2>Create meeting</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Date<input type="date" name="date" id="meeting-date" required></label>
+    <label>Meeting title<input name="title" maxlength="160" required placeholder="Production review"></label>
+    <label>Notes / decisions<textarea name="notes" maxlength="8000" rows="5" placeholder="Key discussion and decisions..."></textarea></label>
+    <label>Action owner<select id="meeting-employee"></select></label>
+    <label>Action<input id="meeting-action" maxlength="5000" placeholder="What needs to be done?"></label>
+    <label>Due date<input type="date" id="meeting-due"></label>
+    <p class="help">Version 1 supports one action while creating a meeting. More actions can be added in the next update.</p>
+    <button class="primary wide" type="submit">Save meeting</button>
+  </form></dialog>
   <dialog id="camera-dialog"><div class="dialog-header"><h2 id="camera-title">Verify your attendance</h2><button class="close-dialog" aria-label="Close">×</button></div><p class="muted" id="camera-description">Face the camera and allow location access.</p><div class="camera-frame"><video id="video" autoplay playsinline muted></video><div class="face-guide" aria-hidden="true"></div></div><p id="camera-status" role="status">Starting camera…</p><label id="consent-label" class="consent" hidden><input type="checkbox" id="consent">The employee agrees to face-template, photo and attendance-location storage, and understands how to request removal.</label><p class="help">Face matching is not certified liveness detection and cannot guarantee protection against photo spoofing.</p><button id="capture-button" class="primary wide" disabled>Capture and verify</button></dialog>
   <div id="notice" role="status" aria-live="polite" hidden></div>
 </body></html>
