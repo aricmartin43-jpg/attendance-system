@@ -92,6 +92,23 @@ def test_customer_and_contact_edits_preserve_history_and_permissions():
     assert 'update_customer' in actions and 'update_customer_contact' in actions
 
 
+def test_inventory_purchase_receipt_and_stock_ledger():
+    admin=client()
+    item=post(admin,'/api/stock-items',{'sku':'CR-2MM','name':'2 mm CR sheet','unit':'kg','reorder_level':'10'}).json
+    supplier=post(admin,'/api/suppliers',{'name':'Steel Supplier'}).json
+    po=post(admin,'/api/purchase-orders',{'supplier_id':supplier['id'],'item_id':item['id'],
+                                          'ordered_qty':'20','unit_price':'80'}).json
+    receive=post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'12'})
+    assert receive.status_code==200 and receive.json['status']=='Part received'
+    assert post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'9'}).status_code==409
+    issue=post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'4','reason':'Laser cutting'})
+    assert issue.status_code==201 and issue.json['balance']=='8.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'9','reason':'Too much'}).status_code==409
+    rows=admin.get(f'/api/stock-items/{item["id"]}/movements').json
+    assert len(rows)==2 and rows[0]['balance']=='8.000'
+    assert admin.get('/api/stock-items').json[0]['quantity']=='8.000'
+
+
 def test_shift_rules_and_record_isolation():
     admin = client()
     worker, _ = employee(admin)

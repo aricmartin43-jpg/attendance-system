@@ -172,12 +172,29 @@ async function openMeetingDialog(){
   await ensureTeam();$('meeting-form').reset();$('meeting-date').value=today;$('meeting-employee').innerHTML=employeeOptions();$('meeting-dialog').showModal();
 }
 
+let stockItems=[],suppliers=[];
+async function refreshStock(){
+  stockItems=await api('/api/stock-items');
+  $('stock-table').innerHTML=stockItems.length?`<div class="table-wrap"><table><thead><tr><th>SKU / item</th><th>Category</th><th>Location</th><th>On hand</th><th>Reorder</th><th>Actions</th></tr></thead><tbody>${stockItems.map(x=>`<tr><td><strong>${escapeHTML(x.sku)}</strong><small>${escapeHTML(x.name)} · ${escapeHTML(x.specification||'')}</small></td><td>${escapeHTML(x.category)}</td><td>${escapeHTML(x.location||'—')}</td><td>${escapeHTML(x.quantity)} ${escapeHTML(x.unit)}</td><td>${Number(x.quantity)<=Number(x.reorder_level)?'<span class="pill">Low stock</span>':escapeHTML(x.reorder_level)}</td><td><button class="small-button" data-stock-history="${x.id}">History</button> <button class="small-button" data-stock-move="${x.id}" ${x.active?'':'disabled'}>Move</button> <button class="small-button" data-stock-edit="${x.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No items yet</strong>Add your first stock item.</div>';
+}
+async function showStockHistory(id){
+  const rows=await api('/api/stock-items/'+id+'/movements');
+  $('stock-history').innerHTML=`<div class="section-card"><h3>Movement history · ${escapeHTML(stockItems.find(x=>x.id===Number(id))?.sku||id)}</h3>${rows.length?`<div class="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Change</th><th>Balance</th><th>Job</th><th>Reason / reference</th></tr></thead><tbody>${rows.map(m=>`<tr><td>${escapeHTML(new Date(m.at).toLocaleString('en-IN'))}</td><td>${escapeHTML(m.kind)}</td><td>${escapeHTML(m.change)}</td><td>${escapeHTML(m.balance)}</td><td>${escapeHTML(m.work_order_id||'—')}</td><td>${escapeHTML(m.reason)} · ${escapeHTML(m.reference||'')}</td></tr>`).join('')}</tbody></table></div>`:'<p>No movements yet.</p>'}</div>`;
+}
+async function refreshPurchasing(){
+  const [s,orders]=await Promise.all([api('/api/suppliers'),api('/api/purchase-orders')]);suppliers=s;
+  $('supplier-table').innerHTML=`<h3>Suppliers</h3>${s.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GSTIN</th></tr></thead><tbody>${s.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.contact||'—')}</td><td>${escapeHTML(x.phone||'—')}</td><td>${escapeHTML(x.gstin||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No suppliers yet.</p>'}`;
+  $('purchase-table').innerHTML=`<h3>Purchase orders</h3>${orders.length?`<div class="table-wrap"><table><thead><tr><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Status</th><th>Action</th></tr></thead><tbody>${orders.map(x=>`<tr><td>PO-${x.id}</td><td>${escapeHTML(x.supplier)}</td><td>${escapeHTML(x.item)}</td><td>${escapeHTML(x.ordered_qty)}</td><td>${escapeHTML(x.received_qty)}</td><td>${escapeHTML(x.status)}</td><td>${x.status==='Received'? 'Complete':`<button class="small-button" data-po-receive="${x.id}" data-outstanding="${Number(x.ordered_qty)-Number(x.received_qty)}">Receive</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No purchase orders yet.</p>'}`;
+}
+
 const views = {
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
   ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
   customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
   machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
   jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
+  inventory:['Inventory','Items, available quantities and stock movements.','▥'],
+  purchasing:['Purchasing','Suppliers, orders and goods received.','◫'],
   employees:['Employees','The people behind every working day.','⊞'],
   work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
   issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
@@ -197,6 +214,8 @@ async function navigate(view) {
   if(view === 'customers') await refreshCustomers();
   if(view === 'machines') await refreshMachines();
   if(view === 'jobs') await refreshJobs();
+  if(view === 'inventory') await refreshStock();
+  if(view === 'purchasing') await refreshPurchasing();
   if(view === 'work') await refreshWork();
   if(view === 'issues') await refreshIssues();
   if(view === 'meetings') await refreshMeetings();
@@ -208,7 +227,7 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
+  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','inventory','purchasing','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
@@ -236,6 +255,15 @@ $('export').addEventListener('click',()=>perform(async()=>{
 
 
 $('add-customer').addEventListener('click',()=>perform(openCustomerDialog));
+$('add-stock-item').addEventListener('click',()=>{$('stock-form').reset();$('stock-form').elements.sku.disabled=false;$('stock-dialog').showModal();});
+$('stock-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api(id?'/api/stock-items/'+id:'/api/stock-items',id?'PATCH':'POST',d);$('stock-dialog').close();await refreshStock();notice('Stock item saved.');});});
+$('stock-table').addEventListener('click',e=>perform(async()=>{const h=e.target.closest('[data-stock-history]'),m=e.target.closest('[data-stock-move]'),ed=e.target.closest('[data-stock-edit]');if(h)return showStockHistory(h.dataset.stockHistory);if(m){$('movement-form').reset();$('movement-form').elements.item_id.value=m.dataset.stockMove;$('movement-dialog').showModal();}if(ed){const x=stockItems.find(i=>i.id===Number(ed.dataset.stockEdit)),f=$('stock-form');f.reset();for(const k of ['sku','name','category','unit','specification','location','reorder_level'])f.elements[k].value=x[k]||'';f.elements.item_id.value=x.id;f.elements.sku.disabled=true;$('stock-dialog').showModal();}}));
+$('movement-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api('/api/stock-items/'+id+'/movements','POST',d);$('movement-dialog').close();await refreshStock();await showStockHistory(id);notice('Stock movement recorded.');});});
+$('add-supplier').addEventListener('click',()=>{$('supplier-form').reset();$('supplier-dialog').showModal();});
+$('supplier-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/suppliers','POST',Object.fromEntries(new FormData(e.currentTarget)));$('supplier-dialog').close();await refreshPurchasing();notice('Supplier saved.');});});
+$('add-purchase-order').addEventListener('click',()=>perform(async()=>{const [s,items]=await Promise.all([api('/api/suppliers'),api('/api/stock-items')]);if(!s.length||!items.length)throw new Error('Add a supplier and a stock item first.');const f=$('purchase-form');f.reset();f.elements.supplier_id.innerHTML=s.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.name)}</option>`).join('');f.elements.item_id.innerHTML=items.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.sku)} · ${escapeHTML(x.name)}</option>`).join('');$('purchase-dialog').showModal();}));
+$('purchase-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/purchase-orders','POST',Object.fromEntries(new FormData(e.currentTarget)));$('purchase-dialog').close();await refreshPurchasing();notice('Purchase order created.');});});
+$('purchase-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-po-receive]');if(!b)return;const value=prompt('Quantity received (maximum '+b.dataset.outstanding+')',b.dataset.outstanding);if(value===null)return;await api('/api/purchase-orders/'+b.dataset.poReceive+'/receive','POST',{quantity:value});await refreshPurchasing();notice('Receipt added to stock.');}));
 $('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
 $('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
 $('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;await api(id?'/api/customers/'+id:'/api/customers',id?'PATCH':'POST',d);$('customer-dialog').close();await refreshCustomers();if(id)await showCustomerDetail(id);notice('Customer saved.');});});

@@ -19,7 +19,8 @@ from flask import Flask, Response, abort, jsonify, render_template, request, ses
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint, func
+from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -284,6 +285,59 @@ class WorkReportLink(Base):
     work_report_id: Mapped[int] = mapped_column(ForeignKey('work_reports.id'), index=True)
     work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True, index=True)
     machine_id: Mapped[int | None] = mapped_column(ForeignKey('customer_machines.id'), nullable=True, index=True)
+
+
+class StockItem(Base):
+    __tablename__ = 'stock_items'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    category: Mapped[str] = mapped_column(String(50), default='Raw material')
+    specification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), default='pcs')
+    location: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reorder_level: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class StockMovement(Base):
+    __tablename__ = 'stock_movements'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey('stock_items.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    quantity_change: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reason: Mapped[str] = mapped_column(String(500))
+    actor_id: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Supplier(Base):
+    __tablename__ = 'suppliers'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(180), unique=True)
+    contact: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    gstin: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PurchaseOrder(Base):
+    __tablename__ = 'purchase_orders'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey('suppliers.id'))
+    item_id: Mapped[int] = mapped_column(ForeignKey('stock_items.id'))
+    ordered_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    received_qty: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14,2), default=0)
+    status: Mapped[str] = mapped_column(String(20), default='Open')
+    expected_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 app = Flask(__name__)
@@ -1422,3 +1476,173 @@ def export():
                              record(r, e)['hours'], r.in_lat, r.in_lng, r.in_accuracy, r.out_lat, r.out_lng, r.out_accuracy])
     return Response('\ufeff' + out.getvalue(), mimetype='text/csv',
                     headers={'Content-Disposition': f'attachment; filename=cosmos-attendance-{request.args["month"]}.csv'})
+
+
+def quantity(value, positive=False):
+    try:
+        n=Decimal(str(value))
+        if not n.is_finite() or n.as_tuple().exponent < -3 or abs(n)>Decimal('99999999999.999') or (positive and n<=0) or (not positive and n<0):
+            raise ValueError()
+        return n
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400,'Enter a valid quantity (up to three decimal places).')
+
+
+def stock_json(item):
+    return dict(id=item.id,sku=item.sku,name=item.name,category=item.category,
+                specification=item.specification,unit=item.unit,location=item.location,
+                reorder_level=str(item.reorder_level),quantity=str(item.quantity),active=item.active)
+
+
+@app.get('/api/stock-items')
+@login_required(admin=True)
+def list_stock_items():
+    with DB() as db:
+        return jsonify([stock_json(x) for x in db.scalars(select(StockItem).order_by(StockItem.name))])
+
+
+@app.post('/api/stock-items')
+@login_required(admin=True)
+def create_stock_item():
+    data=request.get_json(silent=True) or {}
+    sku=clean_text(data,'sku',60).upper()
+    with DB.begin() as db:
+        if db.scalar(select(StockItem.id).where(StockItem.sku==sku)): abort(409,'SKU already exists.')
+        item=StockItem(sku=sku,name=clean_text(data,'name',180),category=str(data.get('category') or 'Raw material')[:50],
+                       specification=str(data.get('specification') or '')[:5000] or None,
+                       unit=clean_text(data,'unit',20),location=str(data.get('location') or '')[:100] or None,
+                       reorder_level=quantity(data.get('reorder_level',0)),quantity=Decimal(0),active=True)
+        db.add(item);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='create_stock_item',target=sku,created_at=now()))
+        return stock_json(item),201
+
+
+@app.patch('/api/stock-items/<int:item_id>')
+@login_required(admin=True)
+def update_stock_item(item_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        item=db.get(StockItem,item_id)
+        if not item: abort(404,'Item not found.')
+        for key,limit in {'name':180,'category':50,'specification':5000,'unit':20,'location':100}.items():
+            if key in data:
+                value=str(data[key] or '').strip()[:limit]
+                if key in ('name','unit') and not value: abort(400,key+' is required.')
+                setattr(item,key,value or None)
+        if 'reorder_level' in data: item.reorder_level=quantity(data['reorder_level'])
+        if 'active' in data: item.active=data['active'] is True
+        db.add(AuditLog(admin_id=request.employee.id,action='update_stock_item',target=item.sku,
+                        detail=json.dumps(data)[:5000],created_at=now()))
+        return stock_json(item)
+
+
+@app.get('/api/stock-items/<int:item_id>/movements')
+@login_required(admin=True)
+def stock_history(item_id):
+    with DB() as db:
+        if not db.get(StockItem,item_id): abort(404,'Item not found.')
+        return jsonify([dict(id=m.id,kind=m.kind,change=str(m.quantity_change),balance=str(m.balance_after),
+                             work_order_id=m.work_order_id,reference=m.reference,reason=m.reason,
+                             actor_id=m.actor_id,at=aware(m.created_at).isoformat())
+                        for m in db.scalars(select(StockMovement).where(StockMovement.item_id==item_id)
+                                            .order_by(StockMovement.id.desc()).limit(200))])
+
+
+@app.post('/api/stock-items/<int:item_id>/movements')
+@login_required(admin=True)
+def move_stock(item_id):
+    data=request.get_json(silent=True) or {}
+    kind=data.get('kind')
+    if kind not in ('Receive','Issue','Return','Adjust'): abort(400,'Choose a stock movement type.')
+    amount=quantity(data.get('quantity'),positive=True) if kind!='Adjust' else None
+    if kind=='Adjust':
+        try: amount=Decimal(str(data.get('quantity')))
+        except (InvalidOperation,TypeError): abort(400,'Invalid adjustment.')
+        if not amount.is_finite() or not amount or amount.as_tuple().exponent < -3 or abs(amount)>Decimal('99999999999.999'): abort(400,'Invalid adjustment.')
+    elif kind=='Issue': amount=-amount
+    reason=clean_text(data,'reason',500)
+    work_order_id=data.get('work_order_id') or None
+    with DB.begin() as db:
+        item=db.scalar(select(StockItem).where(StockItem.id==item_id).with_for_update())
+        if not item or not item.active: abort(404,'Active item not found.')
+        if work_order_id:
+            try: work_order_id=int(work_order_id)
+            except (ValueError,TypeError): abort(400,'Invalid work order.')
+            if not db.get(WorkOrder,work_order_id): abort(404,'Work order not found.')
+        new_balance=item.quantity+amount
+        if new_balance<0: abort(409,'Insufficient stock.')
+        item.quantity=new_balance
+        m=StockMovement(item_id=item.id,kind=kind,quantity_change=amount,balance_after=new_balance,
+                        work_order_id=work_order_id,reference=str(data.get('reference') or '')[:100] or None,
+                        reason=reason,actor_id=request.employee.id,created_at=now())
+        db.add(m);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='stock_movement',target=item.sku,
+                        detail=f'{kind} {amount} {item.unit}: {reason}',created_at=now()))
+        return dict(id=m.id,balance=str(new_balance)),201
+
+
+@app.get('/api/suppliers')
+@login_required(admin=True)
+def list_suppliers():
+    with DB() as db:
+        return jsonify([dict(id=s.id,name=s.name,contact=s.contact,phone=s.phone,email=s.email,gstin=s.gstin,active=s.active)
+                        for s in db.scalars(select(Supplier).order_by(Supplier.name))])
+
+
+@app.post('/api/suppliers')
+@login_required(admin=True)
+def create_supplier():
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        s=Supplier(name=clean_text(data,'name',180),contact=str(data.get('contact') or '')[:120] or None,
+                   phone=str(data.get('phone') or '')[:40] or None,email=str(data.get('email') or '')[:160] or None,
+                   gstin=str(data.get('gstin') or '')[:30] or None,active=True)
+        db.add(s);db.flush()
+        return dict(id=s.id,name=s.name),201
+
+
+@app.get('/api/purchase-orders')
+@login_required(admin=True)
+def list_purchase_orders():
+    with DB() as db:
+        return jsonify([dict(id=p.id,supplier=db.get(Supplier,p.supplier_id).name,item=db.get(StockItem,p.item_id).name,
+                             supplier_id=p.supplier_id,item_id=p.item_id,ordered_qty=str(p.ordered_qty),
+                             received_qty=str(p.received_qty),unit_price=str(p.unit_price),status=p.status,
+                             expected_date=p.expected_date)
+                        for p in db.scalars(select(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(300))])
+
+
+@app.post('/api/purchase-orders')
+@login_required(admin=True)
+def create_purchase_order():
+    data=request.get_json(silent=True) or {}
+    try: supplier_id=int(data.get('supplier_id'));item_id=int(data.get('item_id'))
+    except (TypeError,ValueError): abort(400,'Select a supplier and item.')
+    with DB.begin() as db:
+        if not db.get(Supplier,supplier_id) or not db.get(StockItem,item_id): abort(404,'Supplier or item not found.')
+        p=PurchaseOrder(supplier_id=supplier_id,item_id=item_id,ordered_qty=quantity(data.get('ordered_qty'),True),
+                        received_qty=Decimal(0),unit_price=quantity(data.get('unit_price',0)),
+                        expected_date=str(data.get('expected_date') or '')[:10] or None,
+                        status='Open',created_by=request.employee.id,created_at=now())
+        db.add(p);db.flush()
+        return dict(id=p.id,status=p.status),201
+
+
+@app.post('/api/purchase-orders/<int:order_id>/receive')
+@login_required(admin=True)
+def receive_purchase_order(order_id):
+    data=request.get_json(silent=True) or {}
+    amount=quantity(data.get('quantity'),True)
+    with DB.begin() as db:
+        p=db.scalar(select(PurchaseOrder).where(PurchaseOrder.id==order_id).with_for_update())
+        if not p: abort(404,'Purchase order not found.')
+        if p.status=='Cancelled' or p.received_qty+amount>p.ordered_qty: abort(409,'Receipt exceeds outstanding quantity.')
+        item=db.scalar(select(StockItem).where(StockItem.id==p.item_id).with_for_update())
+        p.received_qty+=amount
+        p.status='Received' if p.received_qty==p.ordered_qty else 'Part received'
+        item.quantity+=amount
+        db.add(StockMovement(item_id=item.id,kind='Receive',quantity_change=amount,balance_after=item.quantity,
+                             reference=f'PO-{p.id}',reason='Purchase order receipt',actor_id=request.employee.id,created_at=now()))
+        db.add(AuditLog(admin_id=request.employee.id,action='receive_purchase_order',target=f'PO-{p.id}',
+                        detail=f'{amount} {item.unit}',created_at=now()))
+        return dict(id=p.id,status=p.status,received_qty=str(p.received_qty),balance=str(item.quantity))
