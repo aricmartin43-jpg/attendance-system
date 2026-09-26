@@ -201,6 +201,20 @@ async function refreshAnalytics(){
   const labels={open_jobs:'Open jobs',overdue_jobs:'Overdue jobs',blocked_steps:'Blocked operations',accepted_quantity:'Accepted quantity',rejected_quantity:'Rejected quantity',low_stock:'Low stock items',open_maintenance:'Open maintenance'};
   $('analytics-content').innerHTML=Object.entries(labels).map(([k,label])=>`<article class="stat"><span>${label}</span><strong>${escapeHTML(data[k])}</strong></article>`).join('');
 }
+async function refreshQuotations(){
+  const rows=await api('/api/quotations');
+  $('quotation-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Quote</th><th>Customer / scope</th><th>Amount ₹</th><th>Follow up</th><th>Status</th><th>Work order</th><th>Action</th></tr></thead><tbody>${rows.map(q=>`<tr><td>${escapeHTML(q.code)} <small>Rev ${q.revision}</small></td><td>${escapeHTML(q.customer)}<small>${escapeHTML(q.title)}</small></td><td>${escapeHTML(q.amount)}</td><td>${escapeHTML(q.follow_up_date||'—')}</td><td>${escapeHTML(q.status)}</td><td>${escapeHTML(q.work_order_id||'—')}</td><td>${q.work_order_id?'Converted':`<button class="small-button" data-quote-status="${q.id}">Status</button> <button class="small-button" data-quote-accept="${q.id}">Accept PO</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No quotations yet.</p>';
+}
+async function refreshJobFiles(){
+  const jobs=await api('/api/work-orders'),select=$('job-file-select'),current=select.value;
+  select.innerHTML=jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+  if(jobs.some(j=>String(j.id)===current))select.value=current;
+  if(!select.value){$('job-material-table').innerHTML='<p>Create a work order first.</p>';$('job-drawing-table').innerHTML='';return;}
+  const id=select.value,[materials,drawings,items]=await Promise.all([api('/api/work-orders/'+id+'/materials'),api('/api/work-orders/'+id+'/drawings'),api('/api/stock-items')]);
+  const itemMap=new Map(items.map(x=>[x.id,x]));
+  $('job-material-table').innerHTML=`<h3>Material requirements</h3>${materials.length?`<div class="table-wrap"><table><thead><tr><th>Material</th><th>Required</th><th>Reserved</th><th>Issued</th><th>Available</th><th>Action</th></tr></thead><tbody>${materials.map(m=>`<tr><td>${escapeHTML(m.sku)} · ${escapeHTML(m.item)}</td><td>${escapeHTML(m.required)}</td><td>${escapeHTML(m.reserved)}</td><td>${escapeHTML(m.issued)}</td><td>${escapeHTML(itemMap.get(m.item_id)?.available||'—')}</td><td><button class="small-button" data-material-action="reserve" data-requirement="${m.id}">Reserve</button> <button class="small-button" data-material-action="issue" data-requirement="${m.id}">Issue</button> <button class="small-button" data-material-action="release" data-requirement="${m.id}">Release</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No material requirements yet.</p>'}`;
+  $('job-drawing-table').innerHTML=`<h3>Drawing revisions</h3>${drawings.length?`<div class="table-wrap"><table><thead><tr><th>Drawing</th><th>Revision</th><th>File reference</th><th>Status</th><th>Action</th></tr></thead><tbody>${drawings.map(d=>`<tr><td>${escapeHTML(d.drawing_no)}</td><td>${escapeHTML(d.revision)}</td><td>${escapeHTML(d.file_reference)}</td><td>${d.approved?'Approved':'Pending'}</td><td>${d.approved?'Current':`<button class="small-button" data-drawing-approve="${d.id}">Approve</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No drawing revisions yet.</p>'}`;
+}
 
 const views = {
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
@@ -208,6 +222,8 @@ const views = {
   customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
   machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
   jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
+  quotations:['Quotations','Enquiries, follow-ups and customer purchase orders.','▣'],
+  'job-files':['Job files','Materials, reservations and approved drawings by work order.','▤'],
   inventory:['Inventory','Items, available quantities and stock movements.','▥'],
   purchasing:['Purchasing','Suppliers, orders and goods received.','◫'],
   production:['Production planning','Operations from drawing to dispatch.','▧'],
@@ -232,6 +248,8 @@ async function navigate(view) {
   if(view === 'customers') await refreshCustomers();
   if(view === 'machines') await refreshMachines();
   if(view === 'jobs') await refreshJobs();
+  if(view === 'quotations') await refreshQuotations();
+  if(view === 'job-files') await refreshJobFiles();
   if(view === 'inventory') await refreshStock();
   if(view === 'purchasing') await refreshPurchasing();
   if(view === 'production') await refreshProduction();
@@ -248,7 +266,7 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','production','inventory','purchasing','maintenance','analytics','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
+  const names = user.admin ? ['overview','ecosystem','customers','quotations','jobs','job-files','production','inventory','purchasing','maintenance','analytics','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
@@ -295,6 +313,16 @@ $('add-maintenance-task').addEventListener('click',()=>perform(async()=>{const a
 $('maintenance-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/maintenance-tasks','POST',Object.fromEntries(new FormData(e.currentTarget)));$('maintenance-dialog').close();await refreshMaintenance();notice('Maintenance task created.');});});
 $('maintenance-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-task-complete]');if(!b)return;const cost=prompt('Repair/service cost ₹','0'),downtime_hours=prompt('Downtime hours','0'),notes=prompt('Completion notes','');if([cost,downtime_hours,notes].includes(null))return;await api('/api/maintenance-tasks/'+b.dataset.taskComplete,'PATCH',{status:'Completed',cost,downtime_hours,notes});await refreshMaintenance();notice('Task completed.');}));
 $('refresh-analytics').addEventListener('click',()=>perform(refreshAnalytics));
+$('add-quotation').addEventListener('click',()=>perform(async()=>{await ensureCustomers();if(!customers.length)throw new Error('Add a customer first.');const f=$('quotation-form');f.reset();f.elements.customer_id.innerHTML=customerOptions();$('quotation-dialog').showModal();}));
+$('quotation-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/quotations','POST',Object.fromEntries(new FormData(e.currentTarget)));$('quotation-dialog').close();await refreshQuotations();notice('Quotation created.');});});
+$('quotation-table').addEventListener('click',e=>perform(async()=>{const accept=e.target.closest('[data-quote-accept]'),status=e.target.closest('[data-quote-status]');if(status){const next=prompt('Status: Draft, Sent, Negotiation, Lost','Sent');if(next===null)return;if(!['Draft','Sent','Negotiation','Lost'].includes(next))throw new Error('Invalid quote status.');await api('/api/quotations/'+status.dataset.quoteStatus,'PATCH',{status:next});await refreshQuotations();return;}if(accept){const customer_po=prompt('Enter customer purchase order number');if(customer_po===null)return;if(!customer_po.trim())throw new Error('Customer PO is required.');await api('/api/quotations/'+accept.dataset.quoteAccept+'/accept','POST',{customer_po});await refreshQuotations();notice('Quotation accepted; work order created.');}}));
+$('job-file-select').addEventListener('change',()=>perform(refreshJobFiles));
+$('add-job-material').addEventListener('click',()=>perform(async()=>{if(!$('job-file-select').value)throw new Error('Create a work order first.');const items=await api('/api/stock-items');const f=$('job-material-form');f.reset();f.elements.item_id.innerHTML=items.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.sku)} · ${escapeHTML(x.name)}</option>`).join('');if(!f.elements.item_id.value)throw new Error('Add a stock item first.');$('job-material-dialog').showModal();}));
+$('job-material-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/materials','POST',Object.fromEntries(new FormData(e.currentTarget)));$('job-material-dialog').close();await refreshJobFiles();notice('Material requirement saved.');});});
+$('job-material-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-material-action]');if(!b)return;const quantity=prompt('Quantity to '+b.dataset.materialAction);if(quantity===null)return;await api('/api/job-materials/'+b.dataset.requirement+'/'+b.dataset.materialAction,'POST',{quantity});await refreshJobFiles();notice('Material '+b.dataset.materialAction+' recorded.');}));
+$('add-job-drawing').addEventListener('click',()=>{if(!$('job-file-select').value)return notice('Create a work order first.',true);$('drawing-form').reset();$('drawing-dialog').showModal();});
+$('drawing-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/work-orders/'+$('job-file-select').value+'/drawings','POST',Object.fromEntries(new FormData(e.currentTarget)));$('drawing-dialog').close();await refreshJobFiles();notice('Drawing revision added.');});});
+$('job-drawing-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-drawing-approve]');if(!b)return;if(!confirm('Approve this revision for production?'))return;await api('/api/drawings/'+b.dataset.drawingApprove+'/approve','POST',{});await refreshJobFiles();notice('Drawing revision approved.');}));
 $('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
 $('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
 $('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;await api(id?'/api/customers/'+id:'/api/customers',id?'PATCH':'POST',d);$('customer-dialog').close();await refreshCustomers();if(id)await showCustomerDetail(id);notice('Customer saved.');});});

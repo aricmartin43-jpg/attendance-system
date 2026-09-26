@@ -126,6 +126,31 @@ def test_employee_file_production_maintenance_and_summary():
     assert summary['open_jobs']==1 and summary['blocked_steps']==1 and summary['open_maintenance']==0
 
 
+def test_quote_to_job_material_reservation_and_drawing_approval():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    quote=post(admin,'/api/quotations',{'customer_id':customer['id'],'title':'Machine cover','amount':'12000'}).json
+    assert quote['code'].startswith('QT-')
+    accepted=post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'BFW-123'})
+    assert accepted.status_code==201
+    job_id=accepted.json['work_order']['id']
+    assert post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'DUP'}).status_code==409
+    item=post(admin,'/api/stock-items',{'sku':'CR-SHEET','name':'CR sheet','unit':'kg'}).json
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Receive','quantity':'10','reason':'Initial stock'}).status_code==201
+    req=post(admin,f'/api/work-orders/{job_id}/materials',{'item_id':item['id'],'required_qty':'8'}).json
+    assert post(admin,f'/api/job-materials/{req["id"]}/reserve',{'quantity':'8'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['available']=='2.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'3','reason':'Generic issue'}).status_code==409
+    assert post(admin,f'/api/job-materials/{req["id"]}/issue',{'quantity':'5'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['quantity']=='5.000'
+    drawing1=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'A','file_reference':'internal/CES-01-A.pdf'}).json
+    drawing2=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'B','file_reference':'internal/CES-01-B.pdf'}).json
+    assert post(admin,f'/api/drawings/{drawing1["id"]}/approve',{}).status_code==200
+    assert post(admin,f'/api/drawings/{drawing2["id"]}/approve',{}).status_code==200
+    drawings=admin.get(f'/api/work-orders/{job_id}/drawings').json
+    assert sum(d['approved'] for d in drawings)==1 and drawings[0]['revision']=='B'
+
+
 def test_shift_rules_and_record_isolation():
     admin = client()
     worker, _ = employee(admin)

@@ -385,6 +385,48 @@ class MaintenanceTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Quotation(Base):
+    __tablename__ = 'quotations'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey('customers.id'), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14,2), default=0)
+    status: Mapped[str] = mapped_column(String(30), default='Draft')
+    follow_up_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    promised_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    customer_po: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MaterialRequirement(Base):
+    __tablename__ = 'material_requirements'
+    __table_args__ = (UniqueConstraint('work_order_id','item_id',name='one_item_per_job'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey('stock_items.id'), index=True)
+    required_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    reserved_qty: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    issued_qty: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+
+
+class DrawingRevision(Base):
+    __tablename__ = 'drawing_revisions'
+    __table_args__ = (UniqueConstraint('work_order_id','drawing_no','revision',name='unique_job_drawing_rev'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    drawing_no: Mapped[str] = mapped_column(String(100))
+    revision: Mapped[str] = mapped_column(String(30))
+    file_reference: Mapped[str] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 app = Flask(__name__)
 app.config.update(SECRET_KEY=SECRET, MAX_CONTENT_LENGTH=3 * 1024 * 1024,
                   SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=PRODUCTION,
@@ -1539,11 +1581,20 @@ def stock_json(item):
                 reorder_level=str(item.reorder_level),quantity=str(item.quantity),active=item.active)
 
 
+def reserved_total(db,item_id):
+    return db.scalar(select(func.coalesce(func.sum(MaterialRequirement.reserved_qty),0))
+                     .where(MaterialRequirement.item_id==item_id)) or Decimal(0)
+
+
 @app.get('/api/stock-items')
 @login_required(admin=True)
 def list_stock_items():
     with DB() as db:
-        return jsonify([stock_json(x) for x in db.scalars(select(StockItem).order_by(StockItem.name))])
+        out=[]
+        for x in db.scalars(select(StockItem).order_by(StockItem.name)):
+            row=stock_json(x);reserved=reserved_total(db,x.id)
+            row.update(reserved=str(reserved),available=str(x.quantity-reserved));out.append(row)
+        return jsonify(out)
 
 
 @app.post('/api/stock-items')
@@ -1616,6 +1667,8 @@ def move_stock(item_id):
             if not db.get(WorkOrder,work_order_id): abort(404,'Work order not found.')
         new_balance=item.quantity+amount
         if new_balance<0: abort(409,'Insufficient stock.')
+        reserved=reserved_total(db,item.id)
+        if new_balance<reserved: abort(409,'Quantity is reserved for jobs. Issue through the job material list or release its reservation first.')
         item.quantity=new_balance
         m=StockMovement(item_id=item.id,kind=kind,quantity_change=amount,balance_after=new_balance,
                         work_order_id=work_order_id,reference=str(data.get('reference') or '')[:100] or None,
@@ -1859,3 +1912,173 @@ def management_summary():
                     rejected_quantity=str(sum((s.rejected_qty for s in steps),Decimal(0))),
                     low_stock=sum(i.quantity<=i.reorder_level for i in items),
                     open_maintenance=sum(t.status!='Completed' for t in tasks))
+
+
+def quote_json(db,q):
+    c=db.get(Customer,q.customer_id)
+    return dict(id=q.id,code=q.code,customer_id=q.customer_id,customer=c.name if c else None,
+                title=q.title,description=q.description,revision=q.revision,amount=str(q.amount),
+                status=q.status,follow_up_date=q.follow_up_date,promised_date=q.promised_date,
+                customer_po=q.customer_po,work_order_id=q.work_order_id)
+
+
+@app.get('/api/quotations')
+@login_required(admin=True)
+def list_quotations():
+    with DB() as db:
+        return jsonify([quote_json(db,q) for q in db.scalars(select(Quotation).order_by(Quotation.id.desc()).limit(300))])
+
+
+@app.post('/api/quotations')
+@login_required(admin=True)
+def create_quotation():
+    data=request.get_json(silent=True) or {}
+    try: customer_id=int(data.get('customer_id'))
+    except (TypeError,ValueError): abort(400,'Select a customer.')
+    with DB.begin() as db:
+        if not db.get(Customer,customer_id): abort(404,'Customer not found.')
+        q=Quotation(customer_id=customer_id,title=clean_text(data,'title',180),
+                    description=str(data.get('description') or '')[:5000] or None,
+                    amount=quantity(data.get('amount',0)),status='Draft',
+                    follow_up_date=str(data.get('follow_up_date') or '')[:10] or None,
+                    promised_date=str(data.get('promised_date') or '')[:10] or None,created_at=now())
+        q.code='TMP-'+secrets.token_hex(8);db.add(q);db.flush();q.code=f'QT-{q.id:05d}'
+        return quote_json(db,q),201
+
+
+@app.patch('/api/quotations/<int:quote_id>')
+@login_required(admin=True)
+def update_quotation(quote_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        q=db.get(Quotation,quote_id)
+        if not q: abort(404,'Quotation not found.')
+        if q.work_order_id: abort(409,'Accepted quotation is locked. Record changes against the work order.')
+        for key,limit in {'title':180,'description':5000,'follow_up_date':10,'promised_date':10}.items():
+            if key in data:
+                value=str(data[key] or '').strip()[:limit] or None
+                if key=='title' and not value: abort(400,'Title is required.')
+                setattr(q,key,value)
+        if 'amount' in data: q.amount=quantity(data['amount'])
+        if 'status' in data:
+            if data['status'] not in ('Draft','Sent','Negotiation','Lost'): abort(400,'Invalid quotation status.')
+            q.status=data['status']
+        q.revision+=1
+        db.add(AuditLog(admin_id=request.employee.id,action='update_quotation',target=q.code,
+                        detail=json.dumps(data)[:1000],created_at=now()))
+        return quote_json(db,q)
+
+
+@app.post('/api/quotations/<int:quote_id>/accept')
+@login_required(admin=True)
+def accept_quotation(quote_id):
+    data=request.get_json(silent=True) or {}
+    po=clean_text(data,'customer_po',100)
+    with DB.begin() as db:
+        q=db.scalar(select(Quotation).where(Quotation.id==quote_id).with_for_update())
+        if not q: abort(404,'Quotation not found.')
+        if q.status=='Lost' or q.work_order_id: abort(409,'Quotation cannot be accepted.')
+        w=WorkOrder(customer_id=q.customer_id,title=q.title,work_type='Manufacturing',
+                    description=q.description,target_date=q.promised_date,status='Open',priority='Normal',created_at=now())
+        db.add(w);db.flush();w.code=f'WO-{w.id:05d}'
+        q.customer_po=po;q.status='Accepted';q.work_order_id=w.id
+        db.add(AuditLog(admin_id=request.employee.id,action='accept_quotation',target=q.code,
+                        detail=f'{po} -> {w.code}',created_at=now()))
+        return dict(quotation=quote_json(db,q),work_order=work_order_json(db,w)),201
+
+
+@app.get('/api/work-orders/<int:job_id>/materials')
+@login_required(admin=True)
+def list_job_materials(job_id):
+    with DB() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Work order not found.')
+        return jsonify([dict(id=r.id,item_id=r.item_id,sku=db.get(StockItem,r.item_id).sku,
+                             item=db.get(StockItem,r.item_id).name,required=str(r.required_qty),
+                             reserved=str(r.reserved_qty),issued=str(r.issued_qty))
+                        for r in db.scalars(select(MaterialRequirement).where(MaterialRequirement.work_order_id==job_id))])
+
+
+@app.post('/api/work-orders/<int:job_id>/materials')
+@login_required(admin=True)
+def add_job_material(job_id):
+    data=request.get_json(silent=True) or {}
+    try: item_id=int(data.get('item_id'))
+    except (TypeError,ValueError): abort(400,'Select an item.')
+    amount=quantity(data.get('required_qty'),True)
+    with DB.begin() as db:
+        if not db.get(WorkOrder,job_id) or not db.get(StockItem,item_id): abort(404,'Job or item not found.')
+        if db.scalar(select(MaterialRequirement.id).where(MaterialRequirement.work_order_id==job_id,MaterialRequirement.item_id==item_id)):
+            abort(409,'Item already exists on this job.')
+        r=MaterialRequirement(work_order_id=job_id,item_id=item_id,required_qty=amount,
+                              reserved_qty=Decimal(0),issued_qty=Decimal(0))
+        db.add(r);db.flush();return {'id':r.id,'required':str(r.required_qty)},201
+
+
+@app.post('/api/job-materials/<int:requirement_id>/<action>')
+@login_required(admin=True)
+def change_job_material(requirement_id,action):
+    if action not in ('reserve','release','issue'): abort(404)
+    data=request.get_json(silent=True) or {}
+    amount=quantity(data.get('quantity'),True)
+    with DB.begin() as db:
+        # Lock the item first for consistent availability across concurrent jobs.
+        item_id=db.scalar(select(MaterialRequirement.item_id).where(MaterialRequirement.id==requirement_id))
+        if not item_id: abort(404,'Material requirement not found.')
+        item=db.scalar(select(StockItem).where(StockItem.id==item_id).with_for_update())
+        r=db.scalar(select(MaterialRequirement).where(MaterialRequirement.id==requirement_id).with_for_update())
+        if action=='reserve':
+            if amount>r.required_qty-r.issued_qty-r.reserved_qty: abort(409,'Reservation exceeds remaining requirement.')
+            if amount>item.quantity-reserved_total(db,item.id): abort(409,'Insufficient available stock.')
+            r.reserved_qty+=amount
+        elif action=='release':
+            if amount>r.reserved_qty: abort(409,'Cannot release more than reserved.')
+            r.reserved_qty-=amount
+        else:
+            if amount>r.reserved_qty: abort(409,'Reserve this material before issuing it.')
+            if amount>item.quantity: abort(409,'Insufficient stock.')
+            r.reserved_qty-=amount;r.issued_qty+=amount;item.quantity-=amount
+            db.add(StockMovement(item_id=item.id,kind='Issue',quantity_change=-amount,balance_after=item.quantity,
+                                 work_order_id=r.work_order_id,reference=f'JOB-{r.work_order_id}',
+                                 reason='Issued against reserved job material',actor_id=request.employee.id,created_at=now()))
+        db.add(AuditLog(admin_id=request.employee.id,action=f'material_{action}',target=f'job:{r.work_order_id}',
+                        detail=f'{item.sku} {amount}',created_at=now()))
+        return dict(id=r.id,reserved=str(r.reserved_qty),issued=str(r.issued_qty),available=str(item.quantity-reserved_total(db,item.id)))
+
+
+@app.get('/api/work-orders/<int:job_id>/drawings')
+@login_required(admin=True)
+def list_drawings(job_id):
+    with DB() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Work order not found.')
+        return jsonify([dict(id=d.id,drawing_no=d.drawing_no,revision=d.revision,
+                             file_reference=d.file_reference,notes=d.notes,approved=d.approved,
+                             approved_by=d.approved_by)
+                        for d in db.scalars(select(DrawingRevision).where(DrawingRevision.work_order_id==job_id)
+                                            .order_by(DrawingRevision.id.desc()))])
+
+
+@app.post('/api/work-orders/<int:job_id>/drawings')
+@login_required(admin=True)
+def add_drawing(job_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Work order not found.')
+        d=DrawingRevision(work_order_id=job_id,drawing_no=clean_text(data,'drawing_no',100),
+                          revision=clean_text(data,'revision',30),file_reference=clean_text(data,'file_reference',500),
+                          notes=str(data.get('notes') or '')[:5000] or None,approved=False,created_at=now())
+        db.add(d);db.flush();return {'id':d.id,'approved':False},201
+
+
+@app.post('/api/drawings/<int:drawing_id>/approve')
+@login_required(admin=True)
+def approve_drawing(drawing_id):
+    with DB.begin() as db:
+        d=db.get(DrawingRevision,drawing_id)
+        if not d: abort(404,'Drawing not found.')
+        for old in db.scalars(select(DrawingRevision).where(DrawingRevision.work_order_id==d.work_order_id,
+                                                            DrawingRevision.drawing_no==d.drawing_no).with_for_update()):
+            old.approved=old.id==d.id
+            old.approved_by=request.employee.id if old.id==d.id else None
+        db.add(AuditLog(admin_id=request.employee.id,action='approve_drawing',target=str(d.id),
+                        detail=f'{d.drawing_no} revision {d.revision}',created_at=now()))
+        return {'id':d.id,'approved':True}
