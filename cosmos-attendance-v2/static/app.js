@@ -45,7 +45,7 @@ async function refreshOverview() {
 async function refreshEmployees() {
   team = await api('/api/employees');
   if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee and assign a secure 4-digit PIN.</div>'; return; }
-  $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-edit="${e.id}">Edit</button><button class="small-button" data-pin="${e.id}">Reset PIN</button><button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
+  $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-file="${e.id}">File</button><button class="small-button" data-edit="${e.id}">Edit</button><button class="small-button" data-pin="${e.id}">Reset PIN</button><button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 async function refreshMine() {
   const identity = await api('/api/session');
@@ -186,6 +186,21 @@ async function refreshPurchasing(){
   $('supplier-table').innerHTML=`<h3>Suppliers</h3>${s.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GSTIN</th></tr></thead><tbody>${s.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.contact||'—')}</td><td>${escapeHTML(x.phone||'—')}</td><td>${escapeHTML(x.gstin||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No suppliers yet.</p>'}`;
   $('purchase-table').innerHTML=`<h3>Purchase orders</h3>${orders.length?`<div class="table-wrap"><table><thead><tr><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Status</th><th>Action</th></tr></thead><tbody>${orders.map(x=>`<tr><td>PO-${x.id}</td><td>${escapeHTML(x.supplier)}</td><td>${escapeHTML(x.item)}</td><td>${escapeHTML(x.ordered_qty)}</td><td>${escapeHTML(x.received_qty)}</td><td>${escapeHTML(x.status)}</td><td>${x.status==='Received'? 'Complete':`<button class="small-button" data-po-receive="${x.id}" data-outstanding="${Number(x.ordered_qty)-Number(x.received_qty)}">Receive</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No purchase orders yet.</p>'}`;
 }
+async function refreshProduction(){
+  const [steps,orders]=await Promise.all([api('/api/production-steps'),api('/api/work-orders')]);
+  const byId=new Map(orders.map(j=>[j.id,j]));
+  $('production-table').innerHTML=steps.length?`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Sequence / operation</th><th>Plan</th><th>Hours plan / actual</th><th>Accepted / rejected</th><th>Status</th><th>Action</th></tr></thead><tbody>${steps.map(s=>`<tr><td>${escapeHTML(byId.get(s.work_order_id)?.code||s.work_order_id)}</td><td>${s.sequence} · ${escapeHTML(s.operation)}</td><td>${escapeHTML(s.planned_date||'—')}</td><td>${escapeHTML(s.planned_hours)} / ${escapeHTML(s.actual_hours)}</td><td>${escapeHTML(s.accepted_qty)} / ${escapeHTML(s.rejected_qty)}</td><td>${escapeHTML(s.status)}${s.delay_reason?`<small>${escapeHTML(s.delay_reason)}</small>`:''}</td><td><button class="small-button" data-step-update="${s.id}">Update</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Add operations to a work order to plan production.</p>';
+}
+async function refreshMaintenance(){
+  const [assets,tasks]=await Promise.all([api('/api/company-assets'),api('/api/maintenance-tasks')]);
+  $('asset-table').innerHTML=`<h3>Company assets</h3>${assets.length?`<div class="table-wrap"><table><thead><tr><th>Code</th><th>Kind / name</th><th>Registration / serial</th><th>Next service</th></tr></thead><tbody>${assets.map(a=>`<tr><td>${escapeHTML(a.code)}</td><td>${escapeHTML(a.kind)} · ${escapeHTML(a.name)}</td><td>${escapeHTML(a.serial_or_registration||'—')}</td><td>${escapeHTML(a.next_service_date||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No company assets yet.</p>'}`;
+  $('maintenance-table').innerHTML=`<h3>Maintenance tasks</h3>${tasks.length?`<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type / work</th><th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>${tasks.map(t=>`<tr><td>${escapeHTML(t.asset)}</td><td>${escapeHTML(t.task_type)} · ${escapeHTML(t.description)}</td><td>${escapeHTML(t.due_date||'—')}</td><td>${escapeHTML(t.status)}</td><td>${t.status==='Completed'?'Done':`<button class="small-button" data-task-complete="${t.id}">Complete</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No maintenance tasks yet.</p>'}`;
+}
+async function refreshAnalytics(){
+  const data=await api('/api/management-summary');
+  const labels={open_jobs:'Open jobs',overdue_jobs:'Overdue jobs',blocked_steps:'Blocked operations',accepted_quantity:'Accepted quantity',rejected_quantity:'Rejected quantity',low_stock:'Low stock items',open_maintenance:'Open maintenance'};
+  $('analytics-content').innerHTML=Object.entries(labels).map(([k,label])=>`<article class="stat"><span>${label}</span><strong>${escapeHTML(data[k])}</strong></article>`).join('');
+}
 
 const views = {
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
@@ -195,6 +210,9 @@ const views = {
   jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
   inventory:['Inventory','Items, available quantities and stock movements.','▥'],
   purchasing:['Purchasing','Suppliers, orders and goods received.','◫'],
+  production:['Production planning','Operations from drawing to dispatch.','▧'],
+  maintenance:['Maintenance','Company machines, bikes and service tasks.','⚒'],
+  analytics:['Management summary','Live company operating measures.','◉'],
   employees:['Employees','The people behind every working day.','⊞'],
   work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
   issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
@@ -216,6 +234,9 @@ async function navigate(view) {
   if(view === 'jobs') await refreshJobs();
   if(view === 'inventory') await refreshStock();
   if(view === 'purchasing') await refreshPurchasing();
+  if(view === 'production') await refreshProduction();
+  if(view === 'maintenance') await refreshMaintenance();
+  if(view === 'analytics') await refreshAnalytics();
   if(view === 'work') await refreshWork();
   if(view === 'issues') await refreshIssues();
   if(view === 'meetings') await refreshMeetings();
@@ -227,7 +248,7 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
-  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','inventory','purchasing','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
+  const names = user.admin ? ['overview','ecosystem','customers','machines','jobs','production','inventory','purchasing','maintenance','analytics','employees','work','issues','meetings','reports'] : ['checkin','jobs','work','issues','meetings'];
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
@@ -264,6 +285,16 @@ $('supplier-form').addEventListener('submit',e=>{e.preventDefault();perform(asyn
 $('add-purchase-order').addEventListener('click',()=>perform(async()=>{const [s,items]=await Promise.all([api('/api/suppliers'),api('/api/stock-items')]);if(!s.length||!items.length)throw new Error('Add a supplier and a stock item first.');const f=$('purchase-form');f.reset();f.elements.supplier_id.innerHTML=s.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.name)}</option>`).join('');f.elements.item_id.innerHTML=items.filter(x=>x.active).map(x=>`<option value="${x.id}">${escapeHTML(x.sku)} · ${escapeHTML(x.name)}</option>`).join('');$('purchase-dialog').showModal();}));
 $('purchase-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/purchase-orders','POST',Object.fromEntries(new FormData(e.currentTarget)));$('purchase-dialog').close();await refreshPurchasing();notice('Purchase order created.');});});
 $('purchase-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-po-receive]');if(!b)return;const value=prompt('Quantity received (maximum '+b.dataset.outstanding+')',b.dataset.outstanding);if(value===null)return;await api('/api/purchase-orders/'+b.dataset.poReceive+'/receive','POST',{quantity:value});await refreshPurchasing();notice('Receipt added to stock.');}));
+$('employee-file-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.employee_id;delete d.employee_id;await api('/api/employee-files/'+id,'PATCH',d);$('employee-file-dialog').close();notice('Employee file saved.');});});
+$('add-production-step').addEventListener('click',()=>perform(async()=>{const orders=await api('/api/work-orders');if(!orders.length)throw new Error('Create a work order first.');const f=$('production-form');f.reset();f.elements.work_order_id.innerHTML=orders.map(x=>`<option value="${x.id}">${escapeHTML(x.code)} · ${escapeHTML(x.title)}</option>`).join('');$('production-dialog').showModal();}));
+$('production-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/production-steps','POST',Object.fromEntries(new FormData(e.currentTarget)));$('production-dialog').close();await refreshProduction();notice('Operation added.');});});
+$('production-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-step-update]');if(!b)return;const status=prompt('Status: Planned, In Progress, Blocked, Completed');if(status===null)return;if(!['Planned','In Progress','Blocked','Completed'].includes(status))throw new Error('Invalid status.');const actual_hours=prompt('Actual hours (total)','0'),accepted_qty=prompt('Accepted quantity (total)','0'),rejected_qty=prompt('Rejected quantity (total)','0'),delay_reason=status==='Blocked'?prompt('Reason for delay',''):'';if([actual_hours,accepted_qty,rejected_qty,delay_reason].includes(null))return;await api('/api/production-steps/'+b.dataset.stepUpdate,'PATCH',{status,actual_hours,accepted_qty,rejected_qty,delay_reason});await refreshProduction();notice('Production updated.');}));
+$('add-asset').addEventListener('click',()=>{$('asset-form').reset();$('asset-dialog').showModal();});
+$('asset-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/company-assets','POST',Object.fromEntries(new FormData(e.currentTarget)));$('asset-dialog').close();await refreshMaintenance();notice('Asset saved.');});});
+$('add-maintenance-task').addEventListener('click',()=>perform(async()=>{const assets=await api('/api/company-assets');if(!assets.length)throw new Error('Add a company asset first.');const f=$('maintenance-form');f.reset();f.elements.asset_id.innerHTML=assets.map(a=>`<option value="${a.id}">${escapeHTML(a.code)} · ${escapeHTML(a.name)}</option>`).join('');$('maintenance-dialog').showModal();}));
+$('maintenance-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/maintenance-tasks','POST',Object.fromEntries(new FormData(e.currentTarget)));$('maintenance-dialog').close();await refreshMaintenance();notice('Maintenance task created.');});});
+$('maintenance-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-task-complete]');if(!b)return;const cost=prompt('Repair/service cost ₹','0'),downtime_hours=prompt('Downtime hours','0'),notes=prompt('Completion notes','');if([cost,downtime_hours,notes].includes(null))return;await api('/api/maintenance-tasks/'+b.dataset.taskComplete,'PATCH',{status:'Completed',cost,downtime_hours,notes});await refreshMaintenance();notice('Task completed.');}));
+$('refresh-analytics').addEventListener('click',()=>perform(refreshAnalytics));
 $('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
 $('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
 $('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;await api(id?'/api/customers/'+id:'/api/customers',id?'PATCH':'POST',d);$('customer-dialog').close();await refreshCustomers();if(id)await showCustomerDetail(id);notice('Customer saved.');});});
@@ -333,7 +364,8 @@ $('employee-form').addEventListener('submit',e=>{e.preventDefault();perform(asyn
 });});
 $('employee-table').addEventListener('click',e=>perform(async()=>{
   const button=e.target.closest('button');if(!button)return;
-  const id=Number(button.dataset.toggle||button.dataset.edit||button.dataset.pin||button.dataset.delete),employee=team.find(p=>p.id===id);if(!employee)return;
+  const id=Number(button.dataset.toggle||button.dataset.edit||button.dataset.pin||button.dataset.delete||button.dataset.file),employee=team.find(p=>p.id===id);if(!employee)return;
+  if(button.dataset.file){const data=await api('/api/employee-files/'+id),f=$('employee-file-form');f.reset();f.elements.employee_id.value=id;for(const k of ['designation','joining_date','skills','notes'])f.elements[k].value=data.profile[k]||'';$('employee-file-title').textContent=employee.name+' · '+employee.code;$('employee-recent-work').innerHTML='<h3>Recent work</h3>'+(data.recent_work.map(x=>`<p>${escapeHTML(x.date)} · ${escapeHTML(x.job_no||'General')} · ${escapeHTML(x.status)}<br>${escapeHTML(x.details)}</p>`).join('')||'<p>No work reports yet.</p>');$('employee-file-dialog').showModal();return;}
   if(button.dataset.edit){const f=$('employee-form');f.reset();$('employee-id').value=employee.id;f.elements.name.value=employee.name;f.elements.code.value=employee.code.toUpperCase();f.elements.department.value=employee.department;$('employee-dialog-title').textContent='Edit employee';$('employee-dialog-note').textContent='Change employee identity or department.';$('pin-label').hidden=true;$('pin-help').hidden=true;f.elements.pin.required=false;$('employee-save').textContent='Save changes';$('employee-dialog').showModal();return;}
   if(button.dataset.pin){const pin=prompt(`Enter a new 4-digit PIN for ${employee.name}:`);if(pin===null)return;if(!/^\d{4}$/.test(pin))throw new Error('PIN must be exactly 4 digits.');await api('/api/employees/'+employee.id+'/reset-pin','POST',{pin});notice('Employee PIN reset.');return;}
   if(button.dataset.toggle){if(!confirm(`${employee.active?'Deactivate':'Activate'} ${employee.name}'s account?`))return;await api('/api/employees/'+employee.id+'/active','POST',{active:!employee.active});await refreshEmployees();notice('Employee access updated.');return;}

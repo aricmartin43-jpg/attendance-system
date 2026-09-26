@@ -340,6 +340,51 @@ class PurchaseOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProductionStep(Base):
+    __tablename__ = 'production_steps'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    operation: Mapped[str] = mapped_column(String(80))
+    assigned_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    planned_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    planned_hours: Mapped[Decimal] = mapped_column(Numeric(10,2), default=0)
+    actual_hours: Mapped[Decimal] = mapped_column(Numeric(10,2), default=0)
+    accepted_qty: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    rejected_qty: Mapped[Decimal] = mapped_column(Numeric(14,3), default=0)
+    status: Mapped[str] = mapped_column(String(30), default='Planned')
+    delay_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class CompanyAsset(Base):
+    __tablename__ = 'company_assets'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(60), unique=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(160))
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    serial_or_registration: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    next_service_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class MaintenanceTask(Base):
+    __tablename__ = 'maintenance_tasks'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey('company_assets.id'), index=True)
+    task_type: Mapped[str] = mapped_column(String(30))
+    description: Mapped[str] = mapped_column(Text)
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    completed_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default='Open')
+    downtime_hours: Mapped[Decimal] = mapped_column(Numeric(10,2), default=0)
+    cost: Mapped[Decimal] = mapped_column(Numeric(14,2), default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 app = Flask(__name__)
 app.config.update(SECRET_KEY=SECRET, MAX_CONTENT_LENGTH=3 * 1024 * 1024,
                   SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=PRODUCTION,
@@ -1646,3 +1691,171 @@ def receive_purchase_order(order_id):
         db.add(AuditLog(admin_id=request.employee.id,action='receive_purchase_order',target=f'PO-{p.id}',
                         detail=f'{amount} {item.unit}',created_at=now()))
         return dict(id=p.id,status=p.status,received_qty=str(p.received_qty),balance=str(item.quantity))
+
+
+@app.get('/api/employee-files/<int:employee_id>')
+@login_required(admin=True)
+def employee_file(employee_id):
+    with DB() as db:
+        e=db.get(Employee,employee_id)
+        if not e: abort(404,'Employee not found.')
+        p=db.scalar(select(EmployeeProfile).where(EmployeeProfile.employee_id==employee_id))
+        reports=db.scalars(select(WorkReport).where(WorkReport.employee_id==employee_id).order_by(WorkReport.id.desc()).limit(30)).all()
+        return dict(employee=person(e),profile=dict(designation=p.designation,joining_date=p.joining_date,
+                    supervisor_id=p.supervisor_id,skills=p.skills,notes=p.notes) if p else {},
+                    recent_work=[dict(date=r.work_date,job_no=r.job_no,status=r.status,details=r.work_details) for r in reports])
+
+
+@app.patch('/api/employee-files/<int:employee_id>')
+@login_required(admin=True)
+def update_employee_file(employee_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        if not db.get(Employee,employee_id): abort(404,'Employee not found.')
+        p=db.scalar(select(EmployeeProfile).where(EmployeeProfile.employee_id==employee_id))
+        if not p: p=EmployeeProfile(employee_id=employee_id);db.add(p)
+        for key,limit in {'designation':100,'joining_date':10,'skills':5000,'notes':5000}.items():
+            if key in data: setattr(p,key,str(data[key] or '').strip()[:limit] or None)
+        if 'supervisor_id' in data:
+            try: sid=int(data['supervisor_id']) if data['supervisor_id'] else None
+            except (TypeError,ValueError): abort(400,'Invalid supervisor.')
+            if sid and not db.get(Employee,sid): abort(404,'Supervisor not found.')
+            p.supervisor_id=sid
+        db.add(AuditLog(admin_id=request.employee.id,action='update_employee_file',target=str(employee_id),
+                        detail=','.join(data.keys())[:500],created_at=now()))
+        return {'ok':True}
+
+
+def step_json(s):
+    return dict(id=s.id,work_order_id=s.work_order_id,sequence=s.sequence,operation=s.operation,
+                assigned_id=s.assigned_id,planned_date=s.planned_date,planned_hours=str(s.planned_hours),
+                actual_hours=str(s.actual_hours),accepted_qty=str(s.accepted_qty),rejected_qty=str(s.rejected_qty),
+                status=s.status,delay_reason=s.delay_reason)
+
+
+@app.get('/api/production-steps')
+@login_required(admin=True)
+def list_production_steps():
+    with DB() as db:
+        return jsonify([step_json(s) for s in db.scalars(select(ProductionStep).order_by(ProductionStep.work_order_id,ProductionStep.sequence).limit(500))])
+
+
+@app.post('/api/production-steps')
+@login_required(admin=True)
+def create_production_step():
+    data=request.get_json(silent=True) or {}
+    try: job_id=int(data.get('work_order_id'));seq=int(data.get('sequence',1))
+    except (TypeError,ValueError): abort(400,'Select a work order and sequence.')
+    with DB.begin() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Work order not found.')
+        s=ProductionStep(work_order_id=job_id,sequence=seq,operation=clean_text(data,'operation',80),
+                         planned_date=str(data.get('planned_date') or '')[:10] or None,
+                         planned_hours=quantity(data.get('planned_hours',0)),actual_hours=Decimal(0),
+                         accepted_qty=Decimal(0),rejected_qty=Decimal(0),status='Planned')
+        db.add(s);db.flush();return step_json(s),201
+
+
+@app.patch('/api/production-steps/<int:step_id>')
+@login_required(admin=True)
+def update_production_step(step_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        s=db.get(ProductionStep,step_id)
+        if not s: abort(404,'Production step not found.')
+        if 'status' in data:
+            if data['status'] not in ('Planned','In Progress','Blocked','Completed'): abort(400,'Invalid status.')
+            s.status=data['status']
+        for key in ('actual_hours','accepted_qty','rejected_qty'):
+            if key in data: setattr(s,key,quantity(data[key]))
+        if 'delay_reason' in data: s.delay_reason=str(data['delay_reason'] or '')[:500] or None
+        db.add(AuditLog(admin_id=request.employee.id,action='update_production_step',target=str(s.id),
+                        detail=json.dumps(data)[:1000],created_at=now()))
+        return step_json(s)
+
+
+def asset_json(a):
+    return dict(id=a.id,code=a.code,kind=a.kind,name=a.name,model=a.model,
+                serial_or_registration=a.serial_or_registration,location=a.location,
+                next_service_date=a.next_service_date,active=a.active)
+
+
+@app.get('/api/company-assets')
+@login_required(admin=True)
+def list_company_assets():
+    with DB() as db: return jsonify([asset_json(a) for a in db.scalars(select(CompanyAsset).order_by(CompanyAsset.code))])
+
+
+@app.post('/api/company-assets')
+@login_required(admin=True)
+def create_company_asset():
+    data=request.get_json(silent=True) or {}
+    if data.get('kind') not in ('Machine','Bike'): abort(400,'Choose Machine or Bike.')
+    with DB.begin() as db:
+        a=CompanyAsset(code=clean_text(data,'code',60).upper(),kind=data['kind'],name=clean_text(data,'name',160),
+                       model=str(data.get('model') or '')[:120] or None,
+                       serial_or_registration=str(data.get('serial_or_registration') or '')[:100] or None,
+                       location=str(data.get('location') or '')[:100] or None,
+                       next_service_date=str(data.get('next_service_date') or '')[:10] or None,active=True)
+        db.add(a);db.flush();return asset_json(a),201
+
+
+@app.get('/api/maintenance-tasks')
+@login_required(admin=True)
+def list_maintenance_tasks():
+    with DB() as db:
+        return jsonify([dict(id=t.id,asset_id=t.asset_id,asset=db.get(CompanyAsset,t.asset_id).name,
+                             task_type=t.task_type,description=t.description,due_date=t.due_date,
+                             completed_date=t.completed_date,status=t.status,downtime_hours=str(t.downtime_hours),
+                             cost=str(t.cost),notes=t.notes)
+                        for t in db.scalars(select(MaintenanceTask).order_by(MaintenanceTask.id.desc()).limit(300))])
+
+
+@app.post('/api/maintenance-tasks')
+@login_required(admin=True)
+def create_maintenance_task():
+    data=request.get_json(silent=True) or {}
+    try: asset_id=int(data.get('asset_id'))
+    except (TypeError,ValueError): abort(400,'Select an asset.')
+    with DB.begin() as db:
+        if not db.get(CompanyAsset,asset_id): abort(404,'Asset not found.')
+        t=MaintenanceTask(asset_id=asset_id,task_type=clean_text(data,'task_type',30),
+                          description=clean_text(data,'description',5000),due_date=str(data.get('due_date') or '')[:10] or None,
+                          status='Open',downtime_hours=Decimal(0),cost=Decimal(0),created_at=now())
+        db.add(t);db.flush();return {'id':t.id,'status':t.status},201
+
+
+@app.patch('/api/maintenance-tasks/<int:task_id>')
+@login_required(admin=True)
+def update_maintenance_task(task_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        t=db.get(MaintenanceTask,task_id)
+        if not t: abort(404,'Task not found.')
+        if 'status' in data:
+            if data['status'] not in ('Open','In Progress','Completed'): abort(400,'Invalid status.')
+            t.status=data['status']
+            if t.status=='Completed': t.completed_date=now().astimezone(LOCAL).date().isoformat()
+        for key in ('cost','downtime_hours'):
+            if key in data: setattr(t,key,quantity(data[key]))
+        if 'notes' in data: t.notes=str(data['notes'] or '')[:5000] or None
+        db.add(AuditLog(admin_id=request.employee.id,action='update_maintenance_task',target=str(t.id),
+                        detail=json.dumps(data)[:1000],created_at=now()))
+        return {'id':t.id,'status':t.status}
+
+
+@app.get('/api/management-summary')
+@login_required(admin=True)
+def management_summary():
+    with DB() as db:
+        jobs=db.scalars(select(WorkOrder)).all()
+        steps=db.scalars(select(ProductionStep)).all()
+        items=db.scalars(select(StockItem).where(StockItem.active==True)).all()
+        tasks=db.scalars(select(MaintenanceTask)).all()
+        today=now().astimezone(LOCAL).date().isoformat()
+        return dict(open_jobs=sum(j.status not in ('Completed','Closed','Cancelled') for j in jobs),
+                    overdue_jobs=sum(j.target_date is not None and j.target_date<today and j.status not in ('Completed','Closed','Cancelled') for j in jobs),
+                    blocked_steps=sum(s.status=='Blocked' for s in steps),
+                    accepted_quantity=str(sum((s.accepted_qty for s in steps),Decimal(0))),
+                    rejected_quantity=str(sum((s.rejected_qty for s in steps),Decimal(0))),
+                    low_stock=sum(i.quantity<=i.reorder_level for i in items),
+                    open_maintenance=sum(t.status!='Completed' for t in tasks))

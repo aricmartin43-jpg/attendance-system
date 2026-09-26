@@ -109,6 +109,23 @@ def test_inventory_purchase_receipt_and_stock_ledger():
     assert admin.get('/api/stock-items').json[0]['quantity']=='8.000'
 
 
+def test_employee_file_production_maintenance_and_summary():
+    admin=client()
+    employee_id=post(admin,'/api/employees',{'code':'CES010','name':'Siva','department':'Design','pin':'1234'}).json['id']
+    patch=lambda path,data: admin.patch(path,json=data,headers={'X-CSRF-Token':admin.csrf})
+    assert patch(f'/api/employee-files/{employee_id}',{'designation':'Designer','skills':'SolidWorks'}).status_code==200
+    assert admin.get(f'/api/employee-files/{employee_id}').json['profile']['skills']=='SolidWorks'
+    customer=post(admin,'/api/customers',{'name':'Machine Builder'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Telescopic cover'}).json
+    step=post(admin,'/api/production-steps',{'work_order_id':job['id'],'operation':'Laser cutting','sequence':1}).json
+    assert patch(f'/api/production-steps/{step["id"]}',{'status':'Blocked','delay_reason':'Sheet shortage'}).status_code==200
+    asset=post(admin,'/api/company-assets',{'code':'BIKE-01','kind':'Bike','name':'Service bike'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Service','description':'Oil change'}).json
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Completed','cost':'800','downtime_hours':'2'}).status_code==200
+    summary=admin.get('/api/management-summary').json
+    assert summary['open_jobs']==1 and summary['blocked_steps']==1 and summary['open_maintenance']==0
+
+
 def test_shift_rules_and_record_isolation():
     admin = client()
     worker, _ = employee(admin)
