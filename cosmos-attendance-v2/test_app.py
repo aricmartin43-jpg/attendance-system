@@ -151,6 +151,26 @@ def test_quote_to_job_material_reservation_and_drawing_approval():
     assert sum(d['approved'] for d in drawings)==1 and drawings[0]['revision']=='B'
 
 
+def test_private_documents_job_card_quality_and_dispatch():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Cover'}).json
+    jid=job['id']
+    worker_id=post(admin,'/api/employees',{'code':'CES011','name':'Worker','department':'Production','pin':'1234'}).json['id']
+    worker=client('CES011','1234')
+    data={'file':(io.BytesIO(b'%PDF-1.4\nsmall test document'),'drawing.pdf')}
+    uploaded=admin.post(f'/api/documents/job/{jid}',data=data,content_type='multipart/form-data',headers={'X-CSRF-Token':admin.csrf})
+    assert uploaded.status_code==201
+    doc_id=uploaded.json['id']
+    assert worker.get(f'/api/documents/download/{doc_id}').status_code==403
+    assert admin.get(f'/api/documents/download/{doc_id}').data.startswith(b'%PDF-')
+    assert str(jid).encode() in admin.get(f'/api/work-orders/{jid}/job-card').data
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
+    assert post(admin,f'/api/work-orders/{jid}/quality',{'operation':'Final','inspected_qty':'5','accepted_qty':'4','rejected_qty':'1'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'4','dispatch_date':'2026-09-26'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
+
+
 def test_shift_rules_and_record_isolation():
     admin = client()
     worker, _ = employee(admin)

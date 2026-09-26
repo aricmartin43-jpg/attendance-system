@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import html
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -19,7 +20,9 @@ from flask import Flask, Response, abort, jsonify, render_template, request, ses
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, LargeBinary, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint, func
+import qrcode
+import qrcode.image.svg
 from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from werkzeug.exceptions import HTTPException
@@ -424,6 +427,46 @@ class DrawingRevision(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     approved_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PrivateDocument(Base):
+    __tablename__ = 'private_documents'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(20))
+    owner_id: Mapped[int] = mapped_column(Integer, index=True)
+    filename: Mapped[str] = mapped_column(String(180))
+    mime: Mapped[str] = mapped_column(String(100))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class QualityCheck(Base):
+    __tablename__ = 'quality_checks'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    operation: Mapped[str] = mapped_column(String(80))
+    inspected_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    accepted_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    rejected_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    result: Mapped[str] = mapped_column(String(20))
+    defect: Mapped[str | None] = mapped_column(Text, nullable=True)
+    inspector_id: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DispatchRecord(Base):
+    __tablename__ = 'dispatch_records'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    dispatch_date: Mapped[str] = mapped_column(String(10))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14,3))
+    transporter: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tracking_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    delivery_note: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    proof_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -2082,3 +2125,147 @@ def approve_drawing(drawing_id):
         db.add(AuditLog(admin_id=request.employee.id,action='approve_drawing',target=str(d.id),
                         detail=f'{d.drawing_no} revision {d.revision}',created_at=now()))
         return {'id':d.id,'approved':True}
+
+
+def verify_document_owner(db,owner_type,owner_id):
+    models={'employee':Employee,'job':WorkOrder,'customer':Customer}
+    if owner_type not in models or not db.get(models[owner_type],owner_id): abort(404,'Record not found.')
+
+
+@app.get('/api/documents/<owner_type>/<int:owner_id>')
+@login_required(admin=True)
+def list_documents(owner_type,owner_id):
+    with DB() as db:
+        verify_document_owner(db,owner_type,owner_id)
+        return jsonify([dict(id=d.id,filename=d.filename,mime=d.mime,uploaded_at=aware(d.created_at).isoformat())
+                        for d in db.scalars(select(PrivateDocument).where(PrivateDocument.owner_type==owner_type,
+                            PrivateDocument.owner_id==owner_id).order_by(PrivateDocument.id.desc()))])
+
+
+@app.post('/api/documents/<owner_type>/<int:owner_id>')
+@login_required(admin=True)
+def upload_document(owner_type,owner_id):
+    uploaded=request.files.get('file')
+    if not uploaded or not uploaded.filename: abort(400,'Choose a document.')
+    name=os.path.basename(uploaded.filename.replace('\\','/'))[:180]
+    ext=name.rsplit('.',1)[-1].lower() if '.' in name else ''
+    types={'pdf':'application/pdf','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg',
+           'dxf':'application/octet-stream','dwg':'application/octet-stream','step':'application/octet-stream',
+           'stp':'application/octet-stream'}
+    if ext not in types: abort(400,'Supported files: PDF, PNG, JPG, DXF, DWG and STEP.')
+    content=uploaded.stream.read(2_000_001)
+    if not content or len(content)>2_000_000: abort(413,'File must be 2 MB or smaller.')
+    if (ext=='pdf' and not content.startswith(b'%PDF-')) or (ext=='png' and not content.startswith(b'\x89PNG')) or (ext in ('jpg','jpeg') and not content.startswith(b'\xff\xd8')):
+        abort(400,'File content does not match its extension.')
+    with DB.begin() as db:
+        verify_document_owner(db,owner_type,owner_id)
+        d=PrivateDocument(owner_type=owner_type,owner_id=owner_id,filename=name,mime=types[ext],
+                          content=content,uploaded_by=request.employee.id,created_at=now())
+        db.add(d);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='upload_document',target=f'{owner_type}:{owner_id}',
+                        detail=f'{d.id} {name}',created_at=now()))
+        return {'id':d.id,'filename':name},201
+
+
+@app.get('/api/documents/download/<int:document_id>')
+@login_required(admin=True)
+def download_document(document_id):
+    with DB() as db:
+        d=db.get(PrivateDocument,document_id)
+        if not d: abort(404,'Document not found.')
+        safe_name=d.filename.replace('"','').replace('\n','')
+        return Response(d.content,mimetype=d.mime,headers={'Content-Disposition':f'attachment; filename="{safe_name}"'})
+
+
+@app.get('/api/work-orders/<int:job_id>/job-card')
+@login_required(admin=True)
+def printable_job_card(job_id):
+    with DB() as db:
+        w=db.get(WorkOrder,job_id)
+        if not w: abort(404,'Work order not found.')
+        customer=db.get(Customer,w.customer_id)
+        steps=db.scalars(select(ProductionStep).where(ProductionStep.work_order_id==job_id).order_by(ProductionStep.sequence)).all()
+        drawings=db.scalars(select(DrawingRevision).where(DrawingRevision.work_order_id==job_id,
+                                                          DrawingRevision.approved==True)).all()
+        url=request.url_root.rstrip('/')+'/?job='+str(job_id)
+        qr=qrcode.make(url,image_factory=qrcode.image.svg.SvgPathImage)
+        buffer=io.BytesIO();qr.save(buffer)
+        qr_uri='data:image/svg+xml;base64,'+base64.b64encode(buffer.getvalue()).decode()
+        esc=html.escape
+        operations=''.join(f'<tr><td>{s.sequence}</td><td>{esc(s.operation)}</td><td>{esc(s.planned_date or "")}</td><td>{esc(s.status)}</td></tr>' for s in steps)
+        approved=', '.join(esc(d.drawing_no+' Rev '+d.revision) for d in drawings) or 'No approved drawing'
+        page=f'''<!doctype html><html><head><meta charset="utf-8"><title>{esc(w.code or str(w.id))} job card</title>
+        <style>body{{font:16px Arial;max-width:900px;margin:32px auto;color:#172231}}header{{display:flex;justify-content:space-between}}
+        img{{width:130px}}table{{border-collapse:collapse;width:100%;margin-top:25px}}td,th{{border:1px solid #aaa;padding:10px;text-align:left}}
+        @media print{{body{{margin:10mm}}}}</style></head><body><header><div><h1>COSMOS · JOB CARD</h1><h2>{esc(w.code or str(w.id))}</h2></div><img src="{qr_uri}" alt="QR link to job"></header>
+        <p><b>Customer:</b> {esc(customer.name if customer else '')}<br><b>Work:</b> {esc(w.title)}<br><b>Target:</b> {esc(w.target_date or 'Not set')}<br><b>Approved drawing:</b> {approved}</p>
+        <table><thead><tr><th>#</th><th>Operation</th><th>Planned date</th><th>Status</th></tr></thead><tbody>{operations}</tbody></table><p>Scan QR and sign in to view the job record.</p></body></html>'''
+        response=Response(page,mimetype='text/html')
+        response.headers['Content-Security-Policy']="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+        return response
+
+
+@app.get('/api/work-orders/<int:job_id>/quality')
+@login_required(admin=True)
+def list_quality(job_id):
+    with DB() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Job not found.')
+        return jsonify([dict(id=x.id,operation=x.operation,inspected=str(x.inspected_qty),accepted=str(x.accepted_qty),
+                             rejected=str(x.rejected_qty),result=x.result,defect=x.defect,
+                             inspector_id=x.inspector_id,at=aware(x.created_at).isoformat())
+                        for x in db.scalars(select(QualityCheck).where(QualityCheck.work_order_id==job_id).order_by(QualityCheck.id.desc()))])
+
+
+@app.post('/api/work-orders/<int:job_id>/quality')
+@login_required(admin=True)
+def create_quality(job_id):
+    data=request.get_json(silent=True) or {}
+    inspected=quantity(data.get('inspected_qty'),True)
+    accepted=quantity(data.get('accepted_qty',0))
+    rejected=quantity(data.get('rejected_qty',0))
+    if accepted+rejected!=inspected: abort(400,'Accepted plus rejected must equal inspected.')
+    result='Pass' if rejected==0 else 'Rework'
+    with DB.begin() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Job not found.')
+        x=QualityCheck(work_order_id=job_id,operation=clean_text(data,'operation',80),
+                       inspected_qty=inspected,accepted_qty=accepted,rejected_qty=rejected,result=result,
+                       defect=str(data.get('defect') or '')[:5000] or None,
+                       inspector_id=request.employee.id,created_at=now())
+        db.add(x);db.flush()
+        return {'id':x.id,'result':result},201
+
+
+@app.get('/api/work-orders/<int:job_id>/dispatch')
+@login_required(admin=True)
+def list_dispatch(job_id):
+    with DB() as db:
+        if not db.get(WorkOrder,job_id): abort(404,'Job not found.')
+        return jsonify([dict(id=x.id,date=x.dispatch_date,quantity=str(x.quantity),transporter=x.transporter,
+                             tracking_reference=x.tracking_reference,delivery_note=x.delivery_note,proof_reference=x.proof_reference)
+                        for x in db.scalars(select(DispatchRecord).where(DispatchRecord.work_order_id==job_id).order_by(DispatchRecord.id.desc()))])
+
+
+@app.post('/api/work-orders/<int:job_id>/dispatch')
+@login_required(admin=True)
+def create_dispatch(job_id):
+    data=request.get_json(silent=True) or {}
+    amount=quantity(data.get('quantity'),True)
+    with DB.begin() as db:
+        w=db.scalar(select(WorkOrder).where(WorkOrder.id==job_id).with_for_update())
+        if not w: abort(404,'Job not found.')
+        accepted=db.scalar(select(func.coalesce(func.sum(QualityCheck.accepted_qty),0)).where(QualityCheck.work_order_id==job_id)) or Decimal(0)
+        sent=db.scalar(select(func.coalesce(func.sum(DispatchRecord.quantity),0)).where(DispatchRecord.work_order_id==job_id)) or Decimal(0)
+        if amount>accepted-sent: abort(409,'Dispatch exceeds inspected and accepted quantity.')
+        date=clean_text(data,'dispatch_date',10)
+        try: datetime.strptime(date,'%Y-%m-%d')
+        except ValueError: abort(400,'Use a valid dispatch date.')
+        x=DispatchRecord(work_order_id=job_id,dispatch_date=date,quantity=amount,
+                         transporter=str(data.get('transporter') or '')[:120] or None,
+                         tracking_reference=str(data.get('tracking_reference') or '')[:120] or None,
+                         delivery_note=str(data.get('delivery_note') or '')[:120] or None,
+                         proof_reference=str(data.get('proof_reference') or '')[:500] or None,
+                         created_by=request.employee.id,created_at=now())
+        db.add(x);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='dispatch_job',target=w.code or str(job_id),
+                        detail=f'{amount} on {date}',created_at=now()))
+        return {'id':x.id,'quantity':str(amount)},201
