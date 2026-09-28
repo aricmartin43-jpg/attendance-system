@@ -276,3 +276,41 @@ def test_maintenance_full_edit_and_storage_access():
     assert user.patch(f'/api/company-assets/{asset["id"]}',json={'name':'Wrong'},headers={'X-CSRF-Token':user.csrf}).status_code==403
     assert user.get('/api/storage-summary').status_code==403
     assert admin.get('/api/storage-summary').json['upload_limit_bytes']==2000000
+
+
+def test_employee_points_ledger_validation_permissions_and_corrections():
+    admin = client()
+    eid = post(admin, '/api/employees', dict(code='pointworker', name='Points Worker', department='Service', pin='1234')).json['id']
+    worker = client('pointworker', '1234')
+    path = f'/api/employees/{eid}/points'
+    day = module.now().astimezone(module.LOCAL).date().isoformat()
+    payload = dict(date=day, category='Work performance', points=10, reason='Completed service with verified quality.')
+    assert worker.get(path).status_code == 403
+    assert post(worker, path, payload).status_code == 403
+    for value in [0, 2.5, True, -101]:
+        assert post(admin, path, {**payload, 'points': value}).status_code == 400
+    for key, value in [('reason',' '), ('category','Invalid'), ('date','2999-01-01')]:
+        assert post(admin, path, {**payload, key: value}).status_code == 400
+    assert admin.get(path+'?month=wrong').status_code == 400
+    assert post(admin, path, payload).status_code == 201
+    deducted = post(admin, path, {**payload, 'category': 'Cleanliness', 'points': -4, 'reason': 'Work area left unclean after shift.'})
+    assert deducted.status_code == 201
+    result = admin.get(path).json
+    assert (result['awarded'], result['deducted'], result['net'], result['all_time']) == (10, 4, 6, 6)
+    assert post(admin, path, {**payload, 'date': '2020-01-01', 'points': -20}).status_code == 201
+    assert admin.get(path).json['net'] == 6
+    assert admin.get(path).json['all_time'] == -14
+    void_path = path+f'/{deducted.json["id"]}/void'
+    assert post(worker, void_path, dict(reason='Correction')).status_code == 403
+    assert post(admin, void_path, dict(reason='')).status_code == 400
+    assert post(admin, f'/api/employees/{eid+1}/points/{deducted.json["id"]}/void', dict(reason='Wrong employee')).status_code == 404
+    assert post(admin, void_path, dict(reason='Incorrect employee selected.')).status_code == 200
+    assert post(admin, void_path, dict(reason='Duplicate correction.')).status_code == 409
+    result = admin.get(path).json
+    assert (result['net'], result['deducted'], result['all_time']) == (10, 0, -10)
+    assert len(result['entries']) == 2
+    voided = next(r for r in result['entries'] if r['id'] == deducted.json['id'])
+    assert voided['voided_at'] and voided['voided_by'] and voided['recorded_by']
+    assert admin.delete(f'/api/employees/{eid}', headers={'X-CSRF-Token':admin.csrf}).status_code == 409
+    with module.DB() as db:
+        assert len(db.scalars(module.select(module.AuditLog).where(module.AuditLog.action.like('employee_points_%'))).all()) == 4
