@@ -1334,12 +1334,31 @@ def customer_detail(customer_id):
             machines.append(machine_json(m,c,db.get(MachineType,m.machine_type_id) if m.machine_type_id else None))
         jobs=[work_order_json(db,w) for w in db.scalars(select(WorkOrder).where(WorkOrder.customer_id==c.id)
                                                        .order_by(WorkOrder.id.desc()).limit(100))]
+        # Reports are associated through a work order or a registered customer machine.
+        # Never match free-text customer names, which can collide across companies.
+        machine_ids=[m['id'] for m in machines]
+        order_ids=[j['id'] for j in jobs]
+        report_links=db.scalars(select(WorkReportLink).where(
+            (WorkReportLink.machine_id.in_(machine_ids)) |
+            (WorkReportLink.work_order_id.in_(order_ids)))).all() if machine_ids or order_ids else []
+        reports=[]
+        for link in report_links:
+            report=db.get(WorkReport,link.work_report_id)
+            employee=db.get(Employee,report.employee_id) if report else None
+            if report and employee:
+                item=work_report_json(report,employee)
+                item.update(machine_id=link.machine_id,work_order_id=link.work_order_id)
+                reports.append(item)
+        reports.sort(key=lambda r:(r['date'],r['id']),reverse=True)
+        serviced_ids={j['machine_id'] for j in jobs if j['machine_id'] and j['work_type'].lower()=='service' and j['status'] in ('Completed','Closed')}
+        serviced_ids.update(r['machine_id'] for r in reports if r['machine_id'])
         result=customer_json(c)
         result.update(
             contacts=[dict(id=x.id,name=x.name,designation=x.designation,department=x.department,phone=x.phone,
                            email=x.email,primary_contact=x.primary_contact,site_id=x.site_id,notes=x.notes) for x in contacts],
             sites=[dict(id=x.id,name=x.name,address=x.address,city=x.city,state=x.state,notes=x.notes) for x in sites],
-            machines=machines,jobs=jobs
+            machines=machines,jobs=jobs,work_reports=reports,
+            serviced_machine_count=len(serviced_ids)
         )
         return result
 
