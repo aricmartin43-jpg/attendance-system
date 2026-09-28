@@ -72,7 +72,7 @@
       </section>
 
       <section id="machines-panel" class="panel-view" hidden>
-        <div class="section-card"><div class="section-heading"><div><h2>Customer machines</h2><p class="muted">Every machine gets its own permanent Cosmos ID and service history.</p></div><button class="primary" id="add-machine">+ Add machine</button></div><div id="machine-table"></div></div>
+        <div class="section-card"><div class="section-heading"><div><h2>Company machine folders</h2><p class="muted">Open a company, select its machine, then review service history, products and technicians.</p></div><button class="primary" id="add-machine">+ Add machine</button></div><div id="machine-table"></div></div>
         <div id="machine-history"></div>
       </section>
 
@@ -167,6 +167,7 @@
     <label>Machine<select name="machine_id" id="job-machine"><option value="">General / no specific machine</option></select></label>
     <div class="form-grid"><label>Work type<select name="work_type"><option>Service</option><option>Manufacturing</option><option>Repair</option><option>Installation</option><option>Inspection</option><option>Preventive Maintenance</option></select></label><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
     <label>Job title<input name="title" maxlength="180" required placeholder="Telescopic cover repair"></label>
+    <label>Product serviced (for service jobs)<input name="service_product" maxlength="180" placeholder="Telescopic cover / chip conveyor / coolant filter"></label>
     <label>Description<textarea name="description" rows="4" maxlength="8000"></textarea></label>
     <div class="form-grid"><label>Job owner<select name="job_owner_id" id="job-owner"></select></label><label>Supervisor<select name="supervisor_id" id="job-supervisor"></select></label></div>
     <label>Assigned employee<select name="assigned_employee_id" id="job-assigned"></select></label>
