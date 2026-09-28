@@ -309,7 +309,8 @@ async function refreshHome(){
   const shortages=stock.filter(s=>s.active&&Number(s.available??s.quantity)<=Number(s.reorder_level));
   const pendingQuotes=quotes.filter(q=>!['Accepted','Lost'].includes(q.status));
   const pendingPurchases=purchases.filter(p=>!['Received','Cancelled'].includes(p.status));
-  const metrics=[['Open work orders',summary.open_jobs,'Across production & service','jobs'],['Overdue jobs',summary.overdue_jobs,'Past their promised date','jobs'],['Low stock items',shortages.length,'Available stock at reorder level','inventory'],['Open maintenance',summary.open_maintenance,'Service tasks awaiting completion','maintenance']];
+  const atWork=activePeople.filter(e=>attendance.some(a=>a.code===e.code&&!a.check_out)).length;
+  const metrics=[['Total employees',activePeople.length,'Active team members','employees'],['On duty',atWork,'Open shifts today','overview'],['Checked in',present,'Attendance recorded today','overview'],['Not checked in',activePeople.length-present,'No check-in today','overview']];
   $('home-metrics').innerHTML=metrics.map(([label,value,note,view],i)=>`<button class="stat metric-card" data-home-view="${view}"><span class="metric-top">${label}<span class="metric-icon">${moduleIcon(view)}</span></span><strong>${escapeHTML(value)}</strong><small>${note} <span aria-hidden="true">↗</span></small></button>`).join('');
   const count=statuses=>orders.filter(j=>statuses.includes(j.status)).length;
   $('home-status-chart').innerHTML=donutChart([
@@ -319,6 +320,18 @@ async function refreshHome(){
     {label:'Completed / closed',value:count(['Completed','Closed']),color:'#4aa889'},
     {label:'Cancelled',value:count(['Cancelled']),color:'#a3afba'}
   ],'work orders');
+  $('home-progress-rings').insertAdjacentHTML('beforeend',`<article class="section-card progress-ring-card order-ring-card"><h2>Order status</h2>${donutChart([{label:'Completed',value:count(['Completed','Closed']),color:'#16b977'},{label:'In progress',value:count(['In Progress']),color:'#087bff'},{label:'Other',value:orders.length-count(['Completed','Closed','In Progress']),color:'#ff9418'}],'orders')}</article>`);
+  const statusChart=(items,label)=>donutChart([...new Set(items.map(i=>i.status))].map((status,i)=>({label:status,value:items.filter(x=>x.status===status).length,color:({Completed:'#16b977','In Progress':'#087bff',Cancelled:'#9aaabd',Open:'#ff9418',Pending:'#ff9418'})[status]||palette[i%palette.length]})),label);
+  $('home-task-chart').innerHTML=statusChart(plans,'tasks');
+  $('home-maintenance-chart').innerHTML=statusChart(maintenance,'tasks');
+  $('home-attendance-chart').innerHTML=donutChart([{label:'Checked in',value:present,color:'#16b977'},{label:'Not checked in',value:activePeople.length-present,color:'#ff9418'}],'employees');
+  const days=Array.from({length:7},(_,i)=>{const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-6+i);return d.toISOString().slice(0,10);});
+  const monthRecords=(await Promise.all([...new Set(days.map(d=>d.slice(0,7)))].map(m=>api('/api/attendance?month='+m)))).flat();
+  const activeCodes=new Set(activePeople.map(e=>e.code));
+  $('home-week-chart').innerHTML='<div class="week-bars">'+days.map(day=>{const n=new Set(monthRecords.filter(r=>r.date===day&&activeCodes.has(r.code)).map(r=>r.code)).size;const pct=activePeople.length?Math.round(n/activePeople.length*100):0;return `<div class="week-column" aria-label="${day}: ${n} checked in, ${pct}%"><strong>${activePeople.length?pct+'%':'—'}</strong><div class="week-track"><span style="height:${pct}%"></span></div><small>${new Date(day+'T12:00:00Z').toLocaleDateString('en',{weekday:'short',timeZone:'UTC'})}</small></div>`;}).join('')+'</div>';
+  $('home-team-table').innerHTML=activePeople.length?`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Last 7 days</th><th>Today</th></tr></thead><tbody>${activePeople.slice(0,5).map(e=>{const n=new Set(monthRecords.filter(r=>r.code===e.code&&days.includes(r.date)).map(r=>r.date)).size;return `<tr><td><strong>${escapeHTML(e.name)}</strong></td><td>${escapeHTML(e.department||'—')}</td><td>${n} check-in days</td><td><span class="attendance-chip ${presentIds.has(e.code)?'present':''}">${presentIds.has(e.code)?'Checked in':'No check-in'}</span></td></tr>`;}).join('')}</tbody></table></div>`:'<p class="dashboard-empty">No active employees yet.</p>';
+  $('home-recent').innerHTML=attendance.length?[...attendance].sort((a,b)=>b.check_in.localeCompare(a.check_in)).slice(0,4).map(r=>`<div class="recent-checkin"><span class="recent-icon">${moduleIcon('overview')}</span><div><strong>${escapeHTML(r.employee)}</strong><small>${escapeHTML(r.department||'Team member')} · Checked in</small></div><time>${new Date(r.check_in).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',timeZone:zone})}</time></div>`).join(''):'<p class="dashboard-empty">No check-ins recorded today.</p>';
+  $('home-shortcuts').innerHTML=[['employees','Employees'],['overview','Attendance'],['planning','Plan tasks'],['jobs','Work orders'],['customers','Customers'],['inventory','Inventory'],['analytics','Reports'],['maintenance','Maintenance']].map(([view,label])=>`<button data-home-view="${view}">${moduleIcon(view)}<span>${label}</span></button>`).join('');
   const attention=[['Overdue work orders',summary.overdue_jobs,'Review delivery dates and blockers','jobs'],['Quotation follow-ups',followUps.length,'Enquiries with a follow-up due today or earlier','quotations'],['Material shortages',shortages.length,'Review reservations and purchasing','inventory'],['Blocked operations',summary.blocked_steps,'Resolve delays on the production floor','production']];
   $('home-attention').innerHTML=attention.map(([label,count,note,view])=>`<button class="attention-row" data-home-view="${view}"><span class="attention-number ${count?'needs-action':''}">${escapeHTML(count)}</span><span><strong>${label}</strong><small>${note}</small></span><span class="row-arrow">↗</span></button>`).join('');
   const stages=[['01','Quotations',pendingQuotes.length,'quotations'],['02','Open work orders',summary.open_jobs,'jobs'],['03','Awaiting materials',pendingPurchases.length,'purchasing']];
@@ -352,6 +365,7 @@ const views = {
 async function navigate(view) {
   if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','planning','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
+  document.body.classList.toggle("dashboard-view",view==="home");
   closeNavigation();
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
   document.querySelectorAll('.nav-button').forEach(el => {el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
