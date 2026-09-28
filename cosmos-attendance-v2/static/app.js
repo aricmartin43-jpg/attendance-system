@@ -246,7 +246,7 @@ async function refreshHome(){
 }
 
 const views = {
-  home:['Workspace overview','Your daily view of customers, people and production.','▦'],
+  home:['Employee Portal overview','Your daily view of customers, people and production.','▦'],
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
   ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
   customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
