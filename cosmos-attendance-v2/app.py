@@ -197,6 +197,21 @@ class Customer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DailyPlan(Base):
+    __tablename__ = 'daily_plans'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_date: Mapped[str] = mapped_column(String(10), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True)
+    estimated_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    priority: Mapped[str] = mapped_column(String(20), default='Normal')
+    status: Mapped[str] = mapped_column(String(20), default='Planned')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class CustomerSite(Base):
     __tablename__ = 'customer_sites'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1220,6 +1235,89 @@ def work_order_json(db, w):
                 completed_date=w.completed_date, status=w.status, priority=w.priority,
                 assignments=[dict(id=a.id,employee_id=e.id,employee=e.name,code=e.code,role=a.role,
                                   responsibility=a.responsibility) for a,e in assignments])
+
+
+def daily_plan_json(db, row):
+    employee=db.get(Employee,row.employee_id)
+    order=db.get(WorkOrder,row.work_order_id) if row.work_order_id else None
+    return dict(id=row.id,date=row.work_date,title=row.title,details=row.details,
+                department=row.department,employee_id=row.employee_id,
+                employee=employee.name if employee else 'Former employee',
+                work_order_id=row.work_order_id,work_order=order.code if order else None,
+                estimated_hours=float(row.estimated_hours),priority=row.priority,status=row.status)
+
+
+@app.get('/api/daily-plans')
+@login_required()
+def list_daily_plans():
+    date=valid_iso_date(request.args.get('date'), 'planning date')
+    with DB() as db:
+        q=select(DailyPlan).where(DailyPlan.work_date==date).order_by(DailyPlan.id)
+        if not request.employee.admin:
+            q=q.where(DailyPlan.employee_id==request.employee.id)
+        return jsonify([daily_plan_json(db,row) for row in db.scalars(q)])
+
+
+@app.post('/api/daily-plans')
+@login_required(admin=True)
+def create_daily_plan():
+    data=request.get_json(silent=True) or {}
+    date=valid_iso_date(data.get('date'), 'planning date')
+    title=clean_text(data,'title',180)
+    try: hours=Decimal(str(data.get('estimated_hours')))
+    except (InvalidOperation,TypeError): abort(400,'Enter estimated hours.')
+    if not hours.is_finite() or hours<=0 or hours>24: abort(400,'Estimated hours must be between 0 and 24.')
+    priority=data.get('priority','Normal')
+    if priority not in ('Normal','High','Urgent'): abort(400,'Invalid priority.')
+    department=str(data.get('department') or '').strip()[:40] or None
+    with DB.begin() as db:
+        order_id=data.get('work_order_id') or None
+        if order_id:
+            try: order_id=int(order_id)
+            except (ValueError,TypeError): abort(400,'Choose a valid work order.')
+            if not db.get(WorkOrder,order_id): abort(404,'Work order not found.')
+        employee_id=data.get('employee_id') or None
+        if employee_id:
+            try: employee_id=int(employee_id)
+            except (ValueError,TypeError): abort(400,'Choose a valid employee.')
+            employee=db.get(Employee,employee_id)
+            if not employee or not employee.active or employee.admin: abort(400,'Choose an active employee.')
+        else:
+            candidates=db.scalars(select(Employee).where(Employee.active==True,Employee.admin==False)
+                                  .order_by(Employee.name)).all()
+            if department:
+                candidates=[e for e in candidates if e.department.casefold()==department.casefold()]
+            if not candidates: abort(400,'No active employee is available in this department.')
+            load={e.id:0.0 for e in candidates}
+            for task in db.scalars(select(DailyPlan).where(DailyPlan.work_date==date,
+                                                          DailyPlan.status!='Cancelled')):
+                if task.employee_id in load: load[task.employee_id]+=float(task.estimated_hours)
+            employee_id=min(candidates,key=lambda e:(load[e.id],e.name)).id
+        row=DailyPlan(work_date=date,title=title,details=str(data.get('details') or '').strip()[:5000] or None,
+                      department=department,employee_id=employee_id,work_order_id=order_id,
+                      estimated_hours=hours,priority=priority,status='Planned',created_at=now())
+        db.add(row);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='create_daily_plan',target=str(row.id),
+                        detail=f'{date} / {title} / employee:{employee_id}',created_at=now()))
+        return daily_plan_json(db,row),201
+
+
+@app.patch('/api/daily-plans/<int:plan_id>')
+@login_required()
+def update_daily_plan(plan_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        row=db.get(DailyPlan,plan_id)
+        if not row: abort(404,'Planned task not found.')
+        if not request.employee.admin and row.employee_id!=request.employee.id:
+            abort(403,'This task is not assigned to you.')
+        status=data.get('status')
+        if status not in ('Planned','In Progress','Completed','Blocked','Cancelled'):
+            abort(400,'Invalid task status.')
+        if not request.employee.admin and status in ('Planned','Cancelled'):
+            abort(403,'Only an administrator can reset or cancel a task.')
+        row.status=status
+        return daily_plan_json(db,row)
 
 
 @app.get('/api/customers')
