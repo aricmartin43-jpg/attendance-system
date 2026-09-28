@@ -1937,6 +1937,55 @@ def receive_purchase_order(order_id):
         return dict(id=p.id,status=p.status,received_qty=str(p.received_qty),balance=str(item.quantity))
 
 
+@app.get('/api/employees/<int:employee_id>/profile')
+@login_required(admin=True)
+def employee_monthly_profile(employee_id):
+    month=str(request.args.get('month') or now().astimezone(LOCAL).strftime('%Y-%m'))
+    if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])',month): abort(400,'Choose a valid month.')
+    start=month+'-01'
+    end=(datetime.strptime(start,'%Y-%m-%d').replace(day=28)+timedelta(days=4)).replace(day=1).date().isoformat()
+    today=now().astimezone(LOCAL).date().isoformat()
+    with DB() as db:
+        employee=db.get(Employee,employee_id)
+        if not employee or employee.admin: abort(404,'Employee not found.')
+        profile=db.scalar(select(EmployeeProfile).where(EmployeeProfile.employee_id==employee_id))
+        company_days=set(db.scalars(select(Attendance.work_date).where(
+            Attendance.work_date>=start,Attendance.work_date<end,Attendance.work_date<=today)).all())
+        present=set(db.scalars(select(Attendance.work_date).where(
+            Attendance.employee_id==employee_id,Attendance.work_date>=start,
+            Attendance.work_date<end,Attendance.work_date<=today)).all())
+        plans=db.scalars(select(DailyPlan).where(DailyPlan.employee_id==employee_id,
+                          DailyPlan.work_date>=start,DailyPlan.work_date<end).order_by(DailyPlan.work_date.desc())).all()
+        due_plans=[p for p in plans if p.work_date<=today and p.status!='Cancelled']
+        done_plans=[p for p in due_plans if p.status=='Completed']
+        reports=db.scalars(select(WorkReport).where(WorkReport.employee_id==employee_id,
+                           WorkReport.work_date>=start,WorkReport.work_date<end)
+                           .order_by(WorkReport.work_date.desc(),WorkReport.id.desc())).all()
+        assigned_ids=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==employee_id)
+        completed_jobs=db.scalars(select(WorkOrder).where(WorkOrder.id.in_(assigned_ids),
+                                 WorkOrder.status.in_(['Completed','Closed']),
+                                 WorkOrder.completed_date>=start,WorkOrder.completed_date<end)).all()
+        attendance_percent=round(100*len(present&company_days)/len(company_days),1) if company_days else None
+        completion_percent=round(100*len(done_plans)/len(due_plans),1) if due_plans else None
+        # Activity points describe recorded actions; they are not an employee rating.
+        points=len(present&company_days)+2*len(done_plans)+3*len(completed_jobs)+len(reports)
+        return dict(employee=person(employee),month=month,
+                    designation=profile.designation if profile else None,
+                    joining_date=profile.joining_date if profile else None,
+                    skills=profile.skills if profile else None,
+                    attendance_days=len(present&company_days),company_recorded_days=len(company_days),
+                    attendance_percent=attendance_percent,
+                    planned_tasks=len(plans),due_tasks=len(due_plans),completed_tasks=len(done_plans),
+                    blocked_tasks=sum(p.status=='Blocked' for p in due_plans),
+                    completion_percent=completion_percent,
+                    completed_work_orders=len(completed_jobs),work_reports=len(reports),
+                    completed_work_reports=sum(r.status.lower()=='completed' for r in reports),
+                    activity_points=points,
+                    recent_tasks=[daily_plan_json(db,p) for p in plans[:20]],
+                    recent_reports=[work_report_json(r,employee) for r in reports[:20]],
+                    completed_jobs=[work_order_json(db,w) for w in completed_jobs[:20]])
+
+
 @app.get('/api/employee-files/<int:employee_id>')
 @login_required(admin=True)
 def employee_file(employee_id):
