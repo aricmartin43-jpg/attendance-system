@@ -355,3 +355,28 @@ def test_policy_memos_half_points_rules_thresholds_and_exceptions_review():
     assert admin.delete(f'/api/employees/{eid}',headers={'X-CSRF-Token':admin.csrf}).status_code==409
     assert admin.get(path+'?month=2020-01').json['monthly']==0
     assert admin.get(path+'?month=2020-01').json['total']==19.5
+
+
+def test_deadline_reminders_custom_dates_permissions_and_completed_filter():
+    admin=client()
+    created=post(admin,'/api/employees',dict(code='rem1',name='Worker',department='Service',pin='1234'))
+    worker=client('rem1','1234')
+    path='/api/deadline-reminders'
+    assert worker.get(path).status_code==403
+    today=module.now().astimezone(module.LOCAL).date()
+    for offset in [-1,0,1,8]:
+        assert post(admin,path,dict(title=f'Task {offset}',due_date=(today+timedelta(days=offset)).isoformat())).status_code==201
+    assert post(admin,path,dict(title='Bad date',due_date='invalid')).status_code==400
+    data=admin.get(path).json
+    assert (data['overdue'],data['due_today'],data['next_week'])==(1,1,1)
+    assert len(data['items'])==4
+    rid=data['items'][0]['id']
+    assert worker.patch(path+f'/{rid}',json=dict(completed=True),headers={'X-CSRF-Token':worker.csrf}).status_code==403
+    assert admin.patch(path+f'/{rid}',json=dict(completed=True),headers={'X-CSRF-Token':admin.csrf}).status_code==200
+    assert admin.get(path).json['overdue']==0
+    assert len(admin.get(path).json['items'])==3
+    with module.DB.begin() as db:
+        for state in ['Planned','Completed','Cancelled']:
+            db.add(module.DailyPlan(employee_id=created.json['id'],work_date=today.isoformat(),title='Plan '+state,estimated_hours=1,status=state,created_at=module.now()))
+    plans=[r for r in admin.get(path).json['items'] if r['kind']=='Planned task']
+    assert len(plans)==1 and plans[0]['title']=='Plan Planned'
