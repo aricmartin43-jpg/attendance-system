@@ -120,6 +120,26 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class EmployeeMemo(Base):
+    __tablename__ = 'employee_memos'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    event_date: Mapped[str] = mapped_column(String(10), index=True)
+    rule_id: Mapped[str] = mapped_column(String(60))
+    rule_label: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(100))
+    half_points: Mapped[int] = mapped_column(Integer)
+    details: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[str] = mapped_column(Text)
+    employee_response: Mapped[str] = mapped_column(Text)
+    review_notes: Mapped[str] = mapped_column(Text)
+    recorded_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    voided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EmployeePoint(Base):
     __tablename__ = 'employee_points'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -743,7 +763,7 @@ def delete_employee(employee_id):
             or db.scalar(select(WorkIssue.id).where(WorkIssue.employee_id == e.id).limit(1))
             or db.scalar(select(MeetingAction.id).where(MeetingAction.employee_id == e.id).limit(1))
         )
-        if has_memory or db.scalar(select(EmployeePoint.id).where(EmployeePoint.employee_id == e.id).limit(1)):
+        if has_memory or db.scalar(select(EmployeeMemo.id).where(EmployeeMemo.employee_id == e.id).limit(1)) or db.scalar(select(EmployeePoint.id).where(EmployeePoint.employee_id == e.id).limit(1)):
             abort(409, 'This employee has company-memory records. Deactivate the account instead of permanently removing it.')
         if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.out_at == None)):
             abort(409, 'This employee must check out before removal.')
@@ -1950,6 +1970,83 @@ def receive_purchase_order(order_id):
         db.add(AuditLog(admin_id=request.employee.id,action='receive_purchase_order',target=f'PO-{p.id}',
                         detail=f'{amount} {item.unit}',created_at=now()))
         return dict(id=p.id,status=p.status,received_qty=str(p.received_qty),balance=str(item.quantity))
+
+
+# Half-point units avoid floating-point rounding in the disciplinary ledger.
+MEMO_RULES = [
+    dict(id='emergency_early',category='Attendance',label='Leaving early due to an unapproved emergency',minimum=0.5,maximum=0.5,source='Company policy section 3'),
+    dict(id='late_30',category='Attendance',label='Late by 30 minutes or less without a valid reason',minimum=1,maximum=1,source='Company policy section 3'),
+    dict(id='early_2h',category='Attendance',label='Unapproved departure up to 2 hours early',minimum=1,maximum=1,source='Company policy section 3'),
+    dict(id='late_or_early_major',category='Attendance',label='More than 30 minutes late or more than 2 hours early, unapproved',minimum=2,maximum=2,source='Company policy section 3'),
+    dict(id='absence_no_form',category='Attendance',label='Full-day absence without a formal leave form',minimum=3,maximum=3,source='Company policy section 3 and leave form'),
+    dict(id='absence_no_notice',category='Attendance',label='Absence without prior notice',minimum=3,maximum=3,source='Company policy section 3 and leave form'),
+    dict(id='behaviour',category='Behaviour',label='Documented disrespectful or disruptive workplace behaviour',minimum=0.5,maximum=3,source='Suggested portal range; not specified in policy'),
+    dict(id='cleanliness',category='Cleanliness',label='Assigned work area or tools left unclean after instruction',minimum=0.5,maximum=2,source='Suggested portal range; not specified in policy'),
+    dict(id='performance',category='Work performance',label='Verified avoidable quality failure or missed agreed task',minimum=0.5,maximum=3,source='Suggested portal range; not specified in policy'),
+    dict(id='discipline',category='Discipline',label='Documented failure to follow a communicated work instruction',minimum=0.5,maximum=3,source='Suggested portal range; not specified in policy'),
+    dict(id='safety',category='Safety',label='Verified failure to follow a communicated safety instruction',minimum=1,maximum=3,source='Suggested portal range; not specified in policy'),
+]
+
+
+@app.route('/api/employees/<int:employee_id>/memos', methods=['GET', 'POST'])
+@login_required(admin=True)
+def employee_memos(employee_id):
+    with DB.begin() as db:
+        employee = db.get(Employee, employee_id)
+        if not employee or employee.admin: abort(404, 'Employee not found.')
+        if request.method == 'POST':
+            data=request.get_json() or {}
+            rule=next((r for r in MEMO_RULES if r['id']==data.get('rule_id')),None)
+            if not rule: abort(400, 'Choose a memo reason.')
+            value=data.get('points')
+            if type(value) not in (int,float) or not math.isfinite(value) or not rule['minimum']<=value<=rule['maximum'] or value*2!=int(value*2):
+                abort(400, 'Points must match the selected range in steps of 0.5.')
+            if data.get('reviewed') is not True: abort(400, 'Review the evidence, permission and leave exceptions before recording a memo.')
+            fields={key:str(data.get(key) or '').strip() for key in ['details','evidence','employee_response','review_notes']}
+            if not 3<=len(fields['details'])<=2000: abort(400, 'Describe the incident in 3 to 2000 characters.')
+            if any(len(v)>2000 for v in fields.values()): abort(400, 'Each note must be 2000 characters or fewer.')
+            event_date=str(data.get('date') or '')
+            try:
+                parsed=datetime.strptime(event_date,'%Y-%m-%d').date()
+                if parsed.isoformat()!=event_date or parsed>now().astimezone(LOCAL).date(): raise ValueError()
+            except ValueError: abort(400, 'Choose today or an earlier valid date.')
+            if db.scalar(select(EmployeeMemo.id).where(EmployeeMemo.employee_id==employee_id,EmployeeMemo.event_date==event_date,
+                         EmployeeMemo.rule_id==rule['id'],EmployeeMemo.details==fields['details'],EmployeeMemo.voided_at==None)):
+                abort(409, 'This memo is already recorded. Review the existing entry.')
+            # One full-day absence must not receive both absence penalties.
+            if rule['id'].startswith('absence_') and db.scalar(select(EmployeeMemo.id).where(EmployeeMemo.employee_id==employee_id,
+                    EmployeeMemo.event_date==event_date,EmployeeMemo.rule_id.in_(['absence_no_form','absence_no_notice']),EmployeeMemo.voided_at==None)):
+                abort(409, 'An absence memo already exists for this employee and date. Do not count the same absence twice.')
+            entry=EmployeeMemo(employee_id=employee_id,event_date=event_date,rule_id=rule['id'],rule_label=rule['label'],source=rule['source'],
+                               half_points=int(value*2),**fields,recorded_by=request.employee.name,created_at=now())
+            db.add(entry);db.flush()
+            db.add(AuditLog(admin_id=request.employee.id,action='employee_memo_added',target=str(employee_id),detail=json.dumps(dict(memo_id=entry.id,points=value,rule_id=rule['id'])),created_at=now()))
+            return dict(id=entry.id),201
+        month=request.args.get('month') or now().astimezone(LOCAL).strftime('%Y-%m')
+        try:
+            if datetime.strptime(month,'%Y-%m').strftime('%Y-%m')!=month: raise ValueError()
+        except ValueError: abort(400,'Choose a valid month.')
+        rows=db.scalars(select(EmployeeMemo).where(EmployeeMemo.employee_id==employee_id,EmployeeMemo.event_date.startswith(month+'-')).order_by(EmployeeMemo.event_date.desc(),EmployeeMemo.id.desc())).all()
+        total=db.scalar(select(func.coalesce(func.sum(EmployeeMemo.half_points),0)).where(EmployeeMemo.employee_id==employee_id,EmployeeMemo.voided_at==None))/2
+        threshold=20 if total>=20 else 16 if total>=16 else 12 if total>=12 else 0
+        return dict(rules=MEMO_RULES,total=total,monthly=sum(r.half_points for r in rows if not r.voided_at)/2,threshold=threshold,
+                    entries=[dict(id=r.id,date=r.event_date,rule=r.rule_label,source=r.source,points=r.half_points/2,details=r.details,evidence=r.evidence,
+                                  employee_response=r.employee_response,review_notes=r.review_notes,recorded_by=r.recorded_by,created_at=aware(r.created_at).isoformat(),
+                                  voided_at=aware(r.voided_at).isoformat() if r.voided_at else None,void_reason=r.void_reason,voided_by=r.voided_by) for r in rows])
+
+
+@app.post('/api/employees/<int:employee_id>/memos/<int:memo_id>/void')
+@login_required(admin=True)
+def void_employee_memo(employee_id,memo_id):
+    reason=str((request.get_json() or {}).get('reason') or '').strip()
+    if not 3<=len(reason)<=1000: abort(400,'Enter a correction reason between 3 and 1000 characters.')
+    with DB.begin() as db:
+        entry=db.scalar(select(EmployeeMemo).where(EmployeeMemo.id==memo_id,EmployeeMemo.employee_id==employee_id).with_for_update())
+        if not entry: abort(404,'Memo not found.')
+        if entry.voided_at: abort(409,'This memo is already voided.')
+        entry.voided_at=now();entry.void_reason=reason;entry.voided_by=request.employee.name
+        db.add(AuditLog(admin_id=request.employee.id,action='employee_memo_voided',target=str(employee_id),detail=json.dumps(dict(memo_id=memo_id,reason=reason)),created_at=now()))
+    return dict(ok=True)
 
 
 POINT_CATEGORIES = ['Work performance', 'Attendance', 'Behaviour', 'Cleanliness', 'Discipline', 'Safety', 'Teamwork', 'Initiative', 'Other']
