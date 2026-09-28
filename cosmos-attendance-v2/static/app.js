@@ -58,16 +58,43 @@ async function refreshEmployees() {
 let selectedEmployeeProfileId=null;
 async function showEmployeeProfile(id,month=today.slice(0,7)){
   selectedEmployeeProfileId=Number(id);
-  const p=await api('/api/employees/'+id+'/profile?month='+encodeURIComponent(month));
+  const [p,points]=await Promise.all([api('/api/employees/'+id+'/profile?month='+encodeURIComponent(month)),api('/api/employees/'+id+'/points?month='+encodeURIComponent(month))]);
   $('employee-profile').innerHTML=`<article class="section-card employee-profile-card"><div class="section-heading"><div><span class="eyebrow accent">EMPLOYEE PROFILE · ${escapeHTML(p.employee.code.toUpperCase())}</span><h2>${escapeHTML(p.employee.name)}</h2><p class="muted">${escapeHTML(p.designation||p.employee.department)} · ${escapeHTML(p.employee.department)}${p.joining_date?' · Joined '+escapeHTML(p.joining_date):''}</p></div><label class="compact-label">Month<input id="employee-profile-month" type="month" value="${escapeHTML(p.month)}"></label></div>
     <div class="stats"><article class="stat"><span>Attendance</span><strong>${p.attendance_percent===null?'—':p.attendance_percent+'%'}</strong><small>${p.attendance_days} of ${p.company_recorded_days} recorded company days</small></article><article class="stat"><span>Planned work completed</span><strong>${p.completed_tasks}</strong><small>${p.due_tasks} due tasks · ${p.completion_percent===null?'No rate yet':p.completion_percent+'% completion'}</small></article><article class="stat"><span>Completed work orders</span><strong>${p.completed_work_orders}</strong><small>Assigned jobs completed this month</small></article><article class="stat"><span>Work reports</span><strong>${p.work_reports}</strong><small>${p.completed_work_reports} marked completed</small></article><article class="stat"><span>Activity points</span><strong>${p.activity_points}</strong><small>Recorded activity, not a rating</small></article></div>
     <div class="employee-donut-grid"><section><h3>Monthly attendance</h3>${donutChart([{label:'Present',value:p.attendance_days,color:'#4aa889'},{label:'No check-in',value:Math.max(0,p.company_recorded_days-p.attendance_days),color:'#e7a05b'}],'recorded days')}</section><section><h3>Planned work progress</h3>${donutChart([{label:'Completed',value:p.completed_tasks,color:'#4aa889'},{label:'Blocked',value:p.blocked_tasks,color:'#d77b6c'},{label:'Other due tasks',value:Math.max(0,p.due_tasks-p.completed_tasks-p.blocked_tasks),color:'#658fc1'}],'due tasks')}</section></div>
     <p class="help">Attendance uses dates when at least one employee checked in, through today. No check-in may include approved leave or holidays because those are not recorded in this rate. Completion rate uses planned tasks due through today, excluding cancelled tasks. Points = 1 per attended day + 2 per completed plan + 3 per completed assigned work order + 1 per submitted work report. Reports and tasks can describe the same job.</p>
+    ${employeePointsPanel(points)}
     <div class="network-columns"><section><h3>Planned tasks</h3>${p.recent_tasks.length?p.recent_tasks.map(t=>`<div class="network-item"><strong>${escapeHTML(t.date)} · ${escapeHTML(t.title)}</strong><span>${escapeHTML(t.status)} · ${escapeHTML(t.estimated_hours)} h</span><small>${escapeHTML(t.work_order||'No work order')}</small></div>`).join(''):'<p class="muted">No tasks planned this month.</p>'}</section>
     <section><h3>Completed work orders</h3>${p.completed_jobs.length?p.completed_jobs.map(j=>`<div class="network-item"><strong>${escapeHTML(j.code)} · ${escapeHTML(j.title)}</strong><span>${escapeHTML(j.completed_date||'—')} · ${escapeHTML(j.customer||'')}</span></div>`).join(''):'<p class="muted">No assigned work orders recorded as completed this month.</p>'}</section>
     <section><h3>Work reports</h3>${p.recent_reports.length?p.recent_reports.map(r=>`<div class="network-item"><strong>${escapeHTML(r.date)} · ${escapeHTML(r.job_no||'General work')}</strong><span>${escapeHTML(r.work_details)}</span><small>${escapeHTML(r.status)}</small></div>`).join(''):'<p class="muted">No work reports this month.</p>'}</section></div></article>`;
   $('employee-profile').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function employeePointsPanel(points){
+  const signed=n=>n>0?'+'+n:String(n);
+  return `<section class="employee-points-panel"><div class="section-heading"><div><h2>Employee points</h2><p class="muted">${escapeHTML(points.month)} · Administrator-recorded awards and deductions</p></div></div>
+    <div class="stats"><article class="stat"><span>Awarded this month</span><strong class="points-positive">+${points.awarded}</strong></article><article class="stat"><span>Deducted this month</span><strong class="points-negative">−${points.deducted}</strong></article><article class="stat"><span>Monthly net</span><strong>${signed(points.net)}</strong></article><article class="stat"><span>All-time balance</span><strong>${signed(points.all_time)}</strong></article></div>
+    <p class="help">Starts at zero. These points are separate from automatic activity points above. Awards add points; deductions subtract points. Voided entries do not affect totals. No automatic attendance deductions.</p>
+    <div class="points-categories">${points.by_category.map(c=>`<span>${escapeHTML(c.category)} <strong>${signed(c.points)}</strong></span>`).join('')}</div>
+    <form id="employee-points-form" class="points-entry-form"><label>Action<select name="action"><option value="award">Award points</option><option value="deduct">Deduct points</option></select></label><label>Category<select name="category">${points.categories.map(c=>`<option>${escapeHTML(c)}</option>`).join('')}</select></label><label>Points<input name="points" type="number" min="1" max="100" step="1" value="5" required></label><label>Event date<input name="date" type="date" value="${today}" max="${today}" required></label><label class="points-reason">Reason / observed work or behaviour<textarea name="reason" minlength="3" maxlength="1000" rows="2" placeholder="Describe what happened and why points are being awarded or deducted." required></textarea></label><button class="primary" type="submit">Save points entry</button></form>
+    <h3 class="points-history-title">Points history · ${escapeHTML(points.month)}</h3>
+    ${points.entries.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Points</th><th>Reason</th><th>Recorded by</th><th>Status / correction</th></tr></thead><tbody>${points.entries.map(r=>`<tr><td>${escapeHTML(r.date)}</td><td>${escapeHTML(r.category)}</td><td class="${r.points>0?'points-positive':'points-negative'}"><strong>${signed(r.points)}</strong></td><td class="points-reason-cell">${escapeHTML(r.reason)}</td><td>${escapeHTML(r.recorded_by)}<small>${escapeHTML(new Date(r.created_at).toLocaleString('en-IN',{timeZone:zone}))}</small></td><td>${r.voided_at?`<strong>Voided</strong><small>${escapeHTML(r.void_reason)}</small><small>By ${escapeHTML(r.voided_by)} · ${escapeHTML(new Date(r.voided_at).toLocaleString('en-IN',{timeZone:zone}))}</small>`:`<button class="small-button" data-void-points="${r.id}">Void / correct</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="help">No points entries this month. Add the first award or deduction above.</p>'}</section>`;
+}
+$('employee-profile').addEventListener('submit',e=>{
+  if(e.target.id!=='employee-points-form')return;
+  e.preventDefault();const form=e.target,button=form.querySelector('button[type="submit"]');if(button.disabled)return;
+  const data=Object.fromEntries(new FormData(form)),employeeId=selectedEmployeeProfileId;
+  button.disabled=true;
+  perform(async()=>{try{
+    await api('/api/employees/'+employeeId+'/points','POST',{category:data.category,points:Number(data.points)*(data.action==='deduct'?-1:1),date:data.date,reason:data.reason});
+    await showEmployeeProfile(employeeId,data.date.slice(0,7));notice('Points entry saved.');
+  }finally{button.disabled=false;}});
+});
+$('employee-profile').addEventListener('click',e=>{
+  const button=e.target.closest('[data-void-points]');if(!button||button.disabled)return;
+  const reason=prompt('Why should this entry be voided? The original entry will remain in the history.');if(reason===null)return;
+  const employeeId=selectedEmployeeProfileId,month=$('employee-profile-month').value;button.disabled=true;
+  perform(async()=>{try{await api('/api/employees/'+employeeId+'/points/'+button.dataset.voidPoints+'/void','POST',{reason});await showEmployeeProfile(employeeId,month);notice('Entry voided and points recalculated. Add a new entry if a replacement is needed.');}finally{button.disabled=false;}});
+});
 async function refreshMine() {
   const identity = await api('/api/session');
   if (!identity.user) throw new Error('Please sign in again.');
