@@ -4,12 +4,19 @@ let csrf = '', user = null, team = [], customers = [], machines = [], jobs = [],
 let stream = null, cameraMode = null, challenge = '', toastTimer, cameraRun = 0;
 const escapeHTML = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function donutChart(parts,centreLabel){
-  const total=parts.reduce((sum,p)=>sum+p.value,0);
-  if(!total)return '<p class="muted donut-empty">No records to chart yet.</p>';
+  const values=parts.map(p=>({...p,value:Math.max(0,Number(p.value)||0)}));
+  const total=values.reduce((sum,p)=>sum+p.value,0);
   let offset=0;
-  const stops=parts.filter(p=>p.value>0).map(p=>{const start=offset;offset+=p.value/total*100;return `${p.color} ${start.toFixed(3)}% ${offset.toFixed(3)}%`;});
-  const label=parts.map(p=>`${p.label}: ${p.value}`).join(', ');
-  return `<div class="donut-layout"><div class="donut-chart" role="img" aria-label="${escapeHTML(label)}" style="background:conic-gradient(${stops.join(',')})"><div class="donut-hole"><strong>${total}</strong><span>${escapeHTML(centreLabel)}</span></div></div><ul class="donut-legend">${parts.map(p=>`<li><span class="donut-swatch" style="background:${p.color}"></span><span>${escapeHTML(p.label)}</span><strong>${p.value}</strong></li>`).join('')}</ul></div>`;
+  const segments=values.filter(p=>p.value>0).map(p=>{
+    const percent=p.value/total*100,start=offset;offset+=percent;
+    return `<circle cx="50" cy="50" r="42" pathLength="100" fill="none" stroke="${escapeHTML(p.color)}" stroke-width="16" stroke-dasharray="${percent} ${100-percent}" stroke-dashoffset="${-start}" transform="rotate(-90 50 50)"><title>${escapeHTML(p.label)}: ${p.value} (${Math.round(percent)}%)</title></circle>`;
+  }).join('');
+  const label=total?values.map(p=>`${p.label}: ${p.value}`).join(', '):'No records yet';
+  return `<div class="donut-layout"><div class="donut-chart svg-donut" role="img" aria-label="${escapeHTML(centreLabel+': '+label)}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="42" fill="none" stroke="#e2eaf3" stroke-width="16"/>${segments}</svg><div class="donut-hole"><strong>${total}</strong><span>${escapeHTML(centreLabel)}</span></div></div><ul class="donut-legend">${values.map(p=>`<li><span class="donut-swatch" style="background:${escapeHTML(p.color)}"></span><span>${escapeHTML(p.label)}</span><strong>${p.value}</strong></li>`).join('')}${total?'':'<li class="donut-no-data">No records yet</li>'}</ul></div>`;
+}
+function progressRing(percent,total,color,label){
+  const value=Math.max(0,Math.min(100,percent));
+  return `<div class="progress-ring svg-donut" role="img" aria-label="${escapeHTML(label)}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="43" fill="none" stroke="#e2eaf3" stroke-width="13"/>${total&&value>0?`<circle cx="50" cy="50" r="43" pathLength="100" fill="none" stroke="${color}" stroke-width="13" stroke-linecap="${value===100?'butt':'round'}" stroke-dasharray="${value} ${100-value}" transform="rotate(-90 50 50)"/>`:''}</svg><span>${total?value+'%':'—'}</span></div>`;
 }
 function notice(message, error = false) {
   $('notice').textContent = message; $('notice').classList.toggle('error', error); $('notice').hidden = false;
@@ -371,7 +378,7 @@ async function refreshHome(){
   const present=activePeople.filter(e=>presentIds.has(e.code)).length;
   const duePlans=plans.filter(p=>p.status!=='Cancelled');
   const rings=[['Attendance today',present,activePeople.length,'#087bff','checked in'],['Tasks today',duePlans.filter(p=>p.status==='Completed').length,duePlans.length,'#16b977','completed'],['Production operations',steps.filter(s=>s.status==='Completed').length,steps.length,'#8d35eb','completed'],['Maintenance tasks',maintenance.filter(t=>t.status==='Completed').length,maintenance.length,'#ff9418','completed']];
-  $('home-progress-rings').innerHTML=rings.map(([title,done,total,color,word])=>{const percent=total?Math.round(done/total*100):0;return `<article class="section-card progress-ring-card"><h2>${title}</h2><div class="progress-ring-content"><div class="progress-ring" role="img" aria-label="${escapeHTML(title)}: ${done} of ${total} ${word}" style="background:conic-gradient(${color} ${percent}%,#e0e8f1 0)"><span>${total?percent+'%':'—'}</span></div><div><small>${word}</small><strong>${done} / ${total}</strong></div></div></article>`;}).join('');
+  $('home-progress-rings').innerHTML=rings.map(([title,done,total,color,word])=>{const percent=total?Math.round(done/total*100):0;return `<article class="section-card progress-ring-card"><h2>${title}</h2><div class="progress-ring-content">${progressRing(percent,total,color,title+': '+done+' of '+total+' '+word)}<div><small>${word}</small><strong>${done} / ${total}</strong></div></div></article>`;}).join('');
   const departments=new Map();activePeople.forEach(e=>departments.set(e.department||'Other',(departments.get(e.department||'Other')||0)+1));
   const palette=['#087bff','#16b977','#ff9418','#8d35eb','#f6c635','#9aaabd'];
   $('home-department-chart').innerHTML=donutChart([...departments].map(([label,value],i)=>({label,value,color:palette[i%palette.length]})),'employees');
