@@ -88,15 +88,34 @@ async function showCustomerDetail(id){
   </article>`;
   $('customer-detail').scrollIntoView({behavior:'smooth',block:'start'});
 }
+let selectedMachineCompanyId=null;
 async function refreshMachines(){
-  machines=await api('/api/machines');
-  if(!machines.length){$('machine-table').innerHTML='<div class="empty"><strong>No machines yet</strong>Add customer machines to create lifetime service histories.</div>';$('machine-history').innerHTML='';return;}
-  $('machine-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Cosmos ID</th><th>Customer</th><th>Customer Machine No.</th><th>Type</th><th>Make / Model</th><th>Status</th><th></th></tr></thead><tbody>${machines.map(m=>`<tr><td><strong>${escapeHTML(m.code)}</strong></td><td>${escapeHTML(m.customer||'—')}</td><td>${escapeHTML(m.customer_machine_no||'—')}</td><td>${escapeHTML(m.machine_type||'—')}</td><td>${escapeHTML([m.manufacturer,m.model].filter(Boolean).join(' / ')||'—')}</td><td>${statusPill(m.status)}</td><td><button class="small-button" data-machine-open="${m.id}">History</button></td></tr>`).join('')}</tbody></table></div>`;
+  selectedMachineCompanyId=null;
+  const companies=await api('/api/customers');
+  $('machine-history').innerHTML='';
+  $('machine-table').innerHTML=companies.length?`<div class="machine-folder-grid">${companies.map(c=>`<button class="section-card machine-folder" data-machine-company="${c.id}"><span class="eyebrow accent">COMPANY FOLDER</span><strong>${escapeHTML(c.name)}</strong><small>${escapeHTML(c.code||'')} · ${c.machine_count} machine${c.machine_count===1?'':'s'}</small></button>`).join('')}</div>`:'<div class="empty"><strong>No companies yet</strong>Add a customer to create its machine folder.</div>';
+}
+async function openMachineCompany(id){
+  selectedMachineCompanyId=Number(id);
+  const [company,rows]=await Promise.all([api('/api/customers/'+id),api('/api/machines?customer_id='+encodeURIComponent(id))]);
+  machines=rows;
+  $('machine-history').innerHTML='';
+  $('machine-table').innerHTML=`<div class="section-card"><button class="text-button" data-machine-back="1">← All companies</button><div class="section-heading"><div><span class="eyebrow accent">COMPANY MACHINES</span><h2>${escapeHTML(company.name)}</h2><p class="muted">${rows.length} registered machine${rows.length===1?'':'s'} · Open a machine to see who serviced it and which product was serviced.</p></div></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Cosmos ID</th><th>Customer machine no.</th><th>Type</th><th>Make / model</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(m=>`<tr><td><strong>${escapeHTML(m.code)}</strong></td><td>${escapeHTML(m.customer_machine_no||'—')}</td><td>${escapeHTML(m.machine_type||'—')}</td><td>${escapeHTML([m.manufacturer,m.model].filter(Boolean).join(' / ')||'—')}</td><td>${statusPill(m.status)}</td><td><button class="small-button" data-machine-open="${m.id}">Service history</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No machines registered for this company yet.</div>'}</div>`;
 }
 async function showMachineHistory(id){
   const h=await api('/api/machines/'+id+'/history'),m=h.machine;
-  $('machine-history').innerHTML=`<article class="section-card machine-history-card"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(m.code)}</span><h2>${escapeHTML(m.customer_machine_no||m.model||'Machine')}</h2><p class="muted">${escapeHTML(m.customer||'')} · ${escapeHTML(m.machine_type||'')} · ${escapeHTML(m.manufacturer||'')} ${escapeHTML(m.model||'')}</p></div></div>
-  <div class="history-timeline">${[...h.work_reports.map(r=>({date:r.date,title:r.work_details,meta:r.employee+' · '+(r.job_no||'Work report'),status:r.status})),...h.jobs.map(j=>({date:j.start_date||'',title:j.title,meta:j.code+' · '+(j.assignments.map(a=>a.employee).join(', ')||'Not assigned'),status:j.status}))].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`<div class="history-entry"><span>${escapeHTML(x.date||'—')}</span><div><strong>${escapeHTML(x.title)}</strong><small>${escapeHTML(x.meta)}</small></div>${statusPill(x.status)}</div>`).join('')||'<div class="empty">No history recorded for this machine yet.</div>'}</div></article>`;
+  if(selectedMachineCompanyId!==m.customer_id)await openMachineCompany(m.customer_id);
+  const serviceJobs=h.jobs.filter(j=>['service','repair','inspection','preventive maintenance','installation'].includes(j.work_type.toLowerCase()));
+  const jobById=new Map(h.jobs.map(j=>[j.id,j]));
+  const events=[
+    ...serviceJobs.map(j=>({date:j.completed_date||j.start_date||'',product:j.service_product||j.title,
+      people:j.assignments.map(a=>a.employee).join(', ')||j.job_owner?.name||'Not recorded',
+      details:j.description||j.title,reference:j.code,status:j.status,type:'Service work order (assigned staff)'})),
+    ...h.work_reports.map(r=>({date:r.date,product:jobById.get(r.work_order_id)?.service_product||jobById.get(r.work_order_id)?.title||r.machine||'Not specified',
+      people:r.employee,details:r.work_details,reference:r.job_no||'Work report',status:r.status,type:'Work report (reported by)'}))
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  $('machine-history').innerHTML=`<article class="section-card machine-history-card"><div class="section-heading"><div><span class="eyebrow accent">${escapeHTML(m.code)} · SERVICE FILE</span><h2>${escapeHTML(m.customer_machine_no||m.model||'Machine')}</h2><p class="muted">${escapeHTML(m.customer||'')} · ${escapeHTML(m.machine_type||'')} · ${escapeHTML([m.manufacturer,m.model].filter(Boolean).join(' / ')||'—')}</p></div></div><h3>Service history</h3>${events.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Product serviced</th><th>Employee / assignment</th><th>Work done</th><th>Record</th><th>Status</th></tr></thead><tbody>${events.map(x=>`<tr><td>${escapeHTML(x.date||'—')}</td><td><strong>${escapeHTML(x.product)}</strong></td><td>${escapeHTML(x.people)}</td><td class="wrap-cell">${escapeHTML(x.details)}</td><td>${escapeHTML(x.type)}<small class="muted">${escapeHTML(x.reference)}</small></td><td>${statusPill(x.status)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No service work or linked reports recorded for this machine yet.</div>'}</article>`;
+  $('machine-history').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function refreshJobs(){
   jobs=await api('/api/work-orders');
@@ -445,7 +464,7 @@ $('customer-detail').addEventListener('click',e=>perform(async()=>{
   if(j){await openJobDialog(j.dataset.addJobCustomer);return;}
   if(mh){await navigate('machines');await showMachineHistory(mh.dataset.machineOpen);}
 }));
-$('machine-table').addEventListener('click',e=>{const b=e.target.closest('[data-machine-open]');if(b)perform(()=>showMachineHistory(b.dataset.machineOpen));});
+$('machine-table').addEventListener('click',e=>{const company=e.target.closest('[data-machine-company]'),machine=e.target.closest('[data-machine-open]'),back=e.target.closest('[data-machine-back]');if(company)perform(()=>openMachineCompany(company.dataset.machineCompany));else if(machine)perform(()=>showMachineHistory(machine.dataset.machineOpen));else if(back)perform(refreshMachines);});
 $('job-table').addEventListener('click',e=>perform(async()=>{const b=e.target.closest('[data-job-status]');if(!b)return;const next=prompt('Status: Open, In Progress, On Hold, Completed, Closed or Cancelled',b.dataset.current);if(next===null)return;const allowed=['Open','In Progress','On Hold','Completed','Closed','Cancelled'];if(!allowed.includes(next))throw new Error('Use one of: '+allowed.join(', '));await api('/api/work-orders/'+b.dataset.jobStatus,'PATCH',{status:next,completed_date:next==='Completed'?today:null});await refreshJobs();notice('Work order updated.');}));
 let networkTimer;
 $('network-search').addEventListener('input',()=>{clearTimeout(networkTimer);networkTimer=setTimeout(()=>perform(runNetworkSearch),250);});
