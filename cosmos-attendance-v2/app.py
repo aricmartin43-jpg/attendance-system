@@ -311,6 +311,9 @@ class StockItem(Base):
     sku: Mapped[str] = mapped_column(String(60), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(180))
     category: Mapped[str] = mapped_column(String(50), default='Raw material')
+    sub_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    size_dimension: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    material_finish: Mapped[str | None] = mapped_column(String(80), nullable=True)
     specification: Mapped[str | None] = mapped_column(Text, nullable=True)
     unit: Mapped[str] = mapped_column(String(20), default='pcs')
     location: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -1737,6 +1740,8 @@ def quantity(value, positive=False):
 
 def stock_json(item):
     return dict(id=item.id,sku=item.sku,name=item.name,category=item.category,
+                sub_category=item.sub_category,size_dimension=item.size_dimension,
+                material_finish=item.material_finish,
                 specification=item.specification,unit=item.unit,location=item.location,
                 reorder_level=str(item.reorder_level),quantity=str(item.quantity),active=item.active)
 
@@ -1764,7 +1769,14 @@ def create_stock_item():
     sku=clean_text(data,'sku',60).upper()
     with DB.begin() as db:
         if db.scalar(select(StockItem.id).where(StockItem.sku==sku)): abort(409,'SKU already exists.')
-        item=StockItem(sku=sku,name=clean_text(data,'name',180),category=str(data.get('category') or 'Raw material')[:50],
+        category=clean_text(data,'category',50)
+        sub_category=clean_text(data,'sub_category',80)
+        size_dimension=clean_text(data,'size_dimension',80)
+        material_finish=clean_text(data,'material_finish',80)
+        name=' - '.join((category,sub_category,size_dimension,material_finish))
+        if len(name)>180: abort(400,'Combined item name must be 180 characters or fewer.')
+        item=StockItem(sku=sku,name=name,category=category,sub_category=sub_category,
+                       size_dimension=size_dimension,material_finish=material_finish,
                        specification=str(data.get('specification') or '')[:5000] or None,
                        unit=clean_text(data,'unit',20),location=str(data.get('location') or '')[:100] or None,
                        reorder_level=quantity(data.get('reorder_level',0)),quantity=Decimal(0),active=True)
@@ -1780,7 +1792,18 @@ def update_stock_item(item_id):
     with DB.begin() as db:
         item=db.get(StockItem,item_id)
         if not item: abort(404,'Item not found.')
-        for key,limit in {'name':180,'category':50,'specification':5000,'unit':20,'location':100}.items():
+        structured=('category','sub_category','size_dimension','material_finish')
+        if any(key in data for key in structured) and all(str(data.get(key) or '').strip() for key in structured):
+            parts=[clean_text(data,key,limit) for key,limit in zip(structured,(50,80,80,80))]
+            name=' - '.join(parts)
+            if len(name)>180: abort(400,'Combined item name must be 180 characters or fewer.')
+            item.category,item.sub_category,item.size_dimension,item.material_finish=parts
+            item.name=name
+        elif any(key in data for key in ('sub_category','size_dimension','material_finish')) and any(str(data.get(key) or '').strip() for key in structured[1:]):
+            abort(400,'Complete all four naming fields.')
+        elif 'category' in data:
+            item.category=clean_text(data,'category',50)
+        for key,limit in {'specification':5000,'unit':20,'location':100}.items():
             if key in data:
                 value=str(data[key] or '').strip()[:limit]
                 if key in ('name','unit') and not value: abort(400,key+' is required.')
