@@ -272,6 +272,7 @@ class WorkOrder(Base):
     site_id: Mapped[int | None] = mapped_column(ForeignKey('customer_sites.id'), nullable=True)
     machine_id: Mapped[int | None] = mapped_column(ForeignKey('customer_machines.id'), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(180))
+    service_product: Mapped[str | None] = mapped_column(String(180), nullable=True)
     work_type: Mapped[str] = mapped_column(String(60), default='Service')
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_owner_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
@@ -1232,7 +1233,8 @@ def work_order_json(db, w):
         return dict(id=e.id,name=e.name,code=e.code) if e else None
     return dict(id=w.id, code=w.code, customer_id=w.customer_id, customer=customer.name if customer else None,
                 machine_id=w.machine_id, machine_code=machine.code if machine else None,
-                machine_no=machine.customer_machine_no if machine else None, title=w.title, work_type=w.work_type,
+                machine_no=machine.customer_machine_no if machine else None, title=w.title,
+                service_product=w.service_product, work_type=w.work_type,
                 description=w.description, job_owner=emp_name(w.job_owner_id), supervisor=emp_name(w.supervisor_id),
                 approved_by=emp_name(w.approved_by_id), start_date=w.start_date, target_date=w.target_date,
                 completed_date=w.completed_date, status=w.status, priority=w.priority,
@@ -1586,13 +1588,18 @@ def machine_history(machine_id):
             if not allowed: abort(403,'This machine is not linked to your assigned work.')
         customer=db.get(Customer,m.customer_id)
         jobs=db.scalars(select(WorkOrder).where(WorkOrder.machine_id==m.id).order_by(WorkOrder.id.desc())).all()
-        links=db.scalars(select(WorkReportLink).where(WorkReportLink.machine_id==m.id).order_by(WorkReportLink.id.desc())).all()
+        job_ids=[w.id for w in jobs]
+        links=db.scalars(select(WorkReportLink).where(
+            (WorkReportLink.machine_id==m.id) | (WorkReportLink.work_order_id.in_(job_ids)))
+            .order_by(WorkReportLink.id.desc())).all()
         reports=[]
         for link in links:
             r=db.get(WorkReport,link.work_report_id)
             if not r: continue
             e=db.get(Employee,r.employee_id)
-            reports.append(work_report_json(r,e))
+            item=work_report_json(r,e)
+            item['work_order_id']=link.work_order_id
+            reports.append(item)
         return dict(machine=machine_json(m,customer,db.get(MachineType,m.machine_type_id) if m.machine_type_id else None),
                     jobs=[work_order_json(db,w) for w in jobs],work_reports=reports)
 
@@ -1630,6 +1637,7 @@ def create_work_order():
         start=valid_iso_date(data['start_date'],'start date') if data.get('start_date') else None
         target=valid_iso_date(data['target_date'],'target date') if data.get('target_date') else None
         w=WorkOrder(customer_id=customer_id,machine_id=machine_id,title=title,
+                    service_product=str(data.get('service_product') or '').strip()[:180] or None,
                     work_type=str(data.get('work_type','Service')).strip()[:60] or 'Service',
                     description=str(data.get('description','')).strip()[:8000] or None,
                     job_owner_id=employee_id('job_owner_id'),supervisor_id=employee_id('supervisor_id'),
