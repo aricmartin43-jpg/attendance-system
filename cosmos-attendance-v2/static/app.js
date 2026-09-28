@@ -103,6 +103,23 @@ async function refreshJobs(){
   if(!jobs.length){$('job-table').innerHTML='<div class="empty"><strong>No work orders yet</strong>Create a work order and assign responsibility.</div>';return;}
   $('job-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Customer</th><th>Machine</th><th>Owner</th><th>Assigned</th><th>Target</th><th>Status</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${jobs.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small class="muted">${escapeHTML(j.title)} · ${escapeHTML(j.work_type)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.machine_no||j.machine_code||'General')}</td><td>${escapeHTML(j.job_owner?.name||'—')}</td><td class="wrap-cell">${escapeHTML(j.assignments.map(a=>a.employee+' ('+a.role+')').join(', ')||'—')}</td><td>${escapeHTML(j.target_date||'—')}</td><td>${statusPill(j.status)}</td>${user.admin?`<td><button class="small-button" data-job-status="${j.id}" data-current="${escapeHTML(j.status)}">Update</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
 }
+async function refreshPlanning(){
+  const date=$('plan-date').value||today;
+  const rows=await api('/api/daily-plans?date='+encodeURIComponent(date));
+  const hours=rows.filter(r=>r.status!=='Cancelled').reduce((sum,r)=>sum+r.estimated_hours,0);
+  $('plan-summary').innerHTML=`<article class="stat"><span>Planned tasks</span><strong>${rows.length}</strong></article><article class="stat"><span>Estimated hours</span><strong>${hours.toFixed(1)}</strong></article><article class="stat"><span>Assigned people</span><strong>${new Set(rows.filter(r=>r.status!=='Cancelled').map(r=>r.employee_id)).size}</strong></article>`;
+  $('plan-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Priority</th><th>Task</th><th>Work order</th><th>Employee</th><th>Hours</th><th>Status</th><th>Update</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.priority)}</td><td><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.department||'Any department')} · ${escapeHTML(r.details||'')}</small></td><td>${escapeHTML(r.work_order||'—')}</td><td>${escapeHTML(r.employee)}</td><td>${escapeHTML(r.estimated_hours)}</td><td>${statusPill(r.status)}</td><td><select aria-label="Update ${escapeHTML(r.title)}" data-plan-status="${r.id}"><option value="">Change status</option>${(user.admin?['Planned','In Progress','Completed','Blocked','Cancelled']:['In Progress','Completed','Blocked']).map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No work planned for this date</strong>Choose another date or add a task.</div>';
+}
+async function openPlanDialog(){
+  await ensureTeam();
+  jobs=await api('/api/work-orders');
+  $('plan-form').reset();$('plan-form-date').value=$('plan-date').value||today;
+  const departments=[...new Set(team.filter(e=>e.active).map(e=>e.department).filter(Boolean))].sort();
+  $('plan-department').innerHTML='<option value="">Any department</option>'+departments.map(d=>`<option value="${escapeHTML(d)}">${escapeHTML(d)}</option>`).join('');
+  $('plan-employee').innerHTML='<option value="">Assign automatically by planned hours</option>'+team.filter(e=>e.active).map(e=>`<option value="${e.id}">${escapeHTML(e.name)} · ${escapeHTML(e.department)}</option>`).join('');
+  $('plan-work-order').innerHTML='<option value="">No work order</option>'+jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+  $('plan-dialog').showModal();
+}
 async function openCustomerDialog(){$('customer-form').reset();$('customer-dialog-title').textContent='Add customer';$('customer-dialog').showModal();}
 async function openMachineDialog(customerId=''){
   await ensureCustomers();$('machine-form').reset();$('machine-customer').innerHTML=customerOptions(customerId);$('machine-dialog').showModal();
@@ -257,6 +274,7 @@ const views = {
   customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
   machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
   jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
+  planning:['Daily planning','Upcoming tasks and employee assignments.','▦'],
   quotations:['Quotations','Enquiries, follow-ups and customer purchase orders.','▣'],
   'job-files':['Job files','Materials, reservations and approved drawings by work order.','▤'],
   inventory:['Inventory','Items, available quantities and stock movements.','▥'],
@@ -272,7 +290,7 @@ const views = {
   checkin:['My attendance','Check in, get to work, and make today count.','◎']
 };
 async function navigate(view) {
-  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
+  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','planning','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
   closeNavigation();
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
@@ -285,6 +303,7 @@ async function navigate(view) {
   if(view === 'customers') await refreshCustomers();
   if(view === 'machines') await refreshMachines();
   if(view === 'jobs') await refreshJobs();
+  if(view === 'planning') await refreshPlanning();
   if(view === 'quotations') await refreshQuotations();
   if(view === 'job-files') await refreshJobFiles();
   if(view === 'inventory') await refreshStock();
@@ -303,16 +322,17 @@ async function showApp() {
   $('account-name').textContent=user.name; $('timezone-label').textContent=zone;
   $('account-avatar').textContent=user.name.split(/\s+/).map(x=>x[0]).slice(0,2).join('');
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
-  $('day-filter').value=today; $('month-filter').value=today.slice(0,7);
+  $('day-filter').value=today; $('month-filter').value=today.slice(0,7); $('plan-date').value=today;
   const groups=user.admin?[
     ['Workspace',['home']],['Sales & customers',['customers','quotations','machines']],
-    ['Operations',['jobs','job-files','production','inventory','purchasing','maintenance']],
+    ['Operations',['planning','jobs','job-files','production','inventory','purchasing','maintenance']],
     ['People & collaboration',['overview','employees','work','issues','meetings']],
     ['Insights',['analytics','reports','ecosystem']]
-  ]:[['My workspace',['checkin','jobs','work','issues','meetings']]];
+  ]:[['My workspace',['checkin','planning','jobs','work','issues','meetings']]];
   const names=groups.flatMap(g=>g[1]);
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
+  $('add-plan').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
   const shortNames={home:'Overview',overview:'Attendance',ecosystem:'Company memory',analytics:'Management summary'};
   $('navigation').innerHTML=groups.map(([title,list])=>`<section class="nav-group"><h2>${title}</h2>${list.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${moduleIcon(view)}</span><span>${shortNames[view]||views[view][0]}</span></button>`).join('')}</section>`).join('');
@@ -394,6 +414,19 @@ $('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(asyn
 $('contact-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id,contactId=d.contact_id;delete d.customer_id;delete d.contact_id;d.primary_contact=e.currentTarget.elements.primary_contact.checked;await api('/api/customers/'+id+'/contacts'+(contactId?'/'+contactId:''),contactId?'PATCH':'POST',d);$('contact-dialog').close();await showCustomerDetail(id);notice('Customer contact saved.');});});
 $('machine-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/machines','POST',Object.fromEntries(new FormData(e.currentTarget)));$('machine-dialog').close();machines=[];await refreshMachines();notice('Machine created.');});});
 $('job-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget));d.assigned_employee_ids=d.assigned_employee_id?[Number(d.assigned_employee_id)]:[];delete d.assigned_employee_id;await api('/api/work-orders','POST',d);$('job-dialog').close();jobs=[];await refreshJobs();notice('Work order created.');});});
+$('plan-date').addEventListener('change',()=>perform(refreshPlanning));
+$('add-plan').addEventListener('click',()=>perform(openPlanDialog));
+$('plan-department').addEventListener('change',e=>{
+  const selected=e.target.value;
+  $('plan-employee').innerHTML='<option value="">Assign automatically by planned hours</option>'+team.filter(x=>x.active&&(!selected||x.department===selected)).map(x=>`<option value="${x.id}">${escapeHTML(x.name)} · ${escapeHTML(x.department)}</option>`).join('');
+});
+$('plan-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
+  const data=Object.fromEntries(new FormData(e.currentTarget));
+  const row=await api('/api/daily-plans','POST',data);
+  $('plan-dialog').close();$('plan-date').value=row.date;await refreshPlanning();
+  notice('Assigned to '+row.employee+'. Review their availability and skills.');
+});});
+$('plan-table').addEventListener('change',e=>{const input=e.target.closest('[data-plan-status]');if(!input||!input.value)return;perform(async()=>{await api('/api/daily-plans/'+input.dataset.planStatus,'PATCH',{status:input.value});await refreshPlanning();notice('Plan status updated.');});});
 $('job-customer').addEventListener('change',e=>perform(()=>loadJobMachines(e.target.value)));
 $('customer-table').addEventListener('click',e=>{const b=e.target.closest('[data-customer-open]');if(b)perform(()=>showCustomerDetail(b.dataset.customerOpen));});
 $('customer-detail').addEventListener('click',e=>perform(async()=>{
