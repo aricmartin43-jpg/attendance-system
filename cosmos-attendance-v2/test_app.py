@@ -256,3 +256,23 @@ def test_pages_and_security_headers():
     assert response.headers['X-Frame-Options'] == 'DENY'
     for path in ('/static/app.js','/static/style.css','/static/favicon.svg'):
         assert c.get(path).status_code == 200
+
+
+def test_maintenance_full_edit_and_storage_access():
+    admin=client()
+    eid=post(admin,'/api/employees',{'code':'ces001','name':'Test Employee','department':'Production','pin':'1234'}).json['id']
+    user=client('ces001','1234')
+    asset=post(admin,'/api/company-assets',{'code':'M1','kind':'Machine','name':'Laser'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Repair','description':'Old work'}).json
+    patch=lambda path,data: admin.patch(path,json=data,headers={'X-CSRF-Token':admin.csrf})
+    assert patch(f'/api/company-assets/{asset["id"]}',{'name':'Laser 3015','location':'Unit 2','next_service_date':'2026-10-01'}).status_code==200
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'description':'Replace nozzle','due_date':'2026-10-02','status':'Completed','completed_date':'2026-09-28','cost':'1200','notes':'Checked'}).status_code==200
+    record=admin.get('/api/maintenance-tasks').json[0]
+    assert record['asset_id']==asset['id'] and record['asset']=='Laser 3015'
+    assert record['description']=='Replace nozzle' and record['completed_date']=='2026-09-28'
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Open'}).status_code==200
+    assert admin.get('/api/maintenance-tasks').json[0]['completed_date'] is None
+    assert patch(f'/api/company-assets/{asset["id"]}',{'next_service_date':'bad'}).status_code==400
+    assert user.patch(f'/api/company-assets/{asset["id"]}',json={'name':'Wrong'},headers={'X-CSRF-Token':user.csrf}).status_code==403
+    assert user.get('/api/storage-summary').status_code==403
+    assert admin.get('/api/storage-summary').json['upload_limit_bytes']==2000000
