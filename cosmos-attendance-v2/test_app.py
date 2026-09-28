@@ -252,7 +252,7 @@ def test_successful_challenge_cannot_be_replayed():
 def test_pages_and_security_headers():
     c=module.app.test_client()
     response=c.get('/')
-    assert response.status_code == 200 and 'Cosmos Attendance' in response.text
+    assert response.status_code == 200 and 'Cosmos Employee Portal' in response.text
     assert response.headers['X-Frame-Options'] == 'DENY'
     for path in ('/static/app.js','/static/style.css','/static/favicon.svg'):
         assert c.get(path).status_code == 200
