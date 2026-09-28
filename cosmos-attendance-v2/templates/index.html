@@ -29,6 +29,7 @@
     <main class="content">
       <div class="page-heading"><div><span class="eyebrow accent">COSMOS ENGINEERING SOLUTIONS</span><h1 id="page-title">Attendance overview</h1><p id="page-subtitle" class="muted">A clear view of your team's working day.</p></div><div class="date-badge" id="today-label"></div></div>
       <section id="home-panel" class="panel-view" hidden>
+        <button id="home-reminder-alert" class="secondary wide" data-home-view="reminders">View deadline reminders</button>
         <div id="home-metrics" class="stats"></div>
         <div id="home-progress-rings" class="progress-ring-grid"></div>
         <div class="dashboard-chart-grid dashboard-main-grid">
@@ -44,6 +45,11 @@
         </div>
         <div class="home-grid"><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRIORITIES</span><h2>Needs your attention</h2></div><span class="subtle-tag">Live records</span></div><div id="home-attention"></div></article><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">QUOTE TO DELIVERY</span><h2>Work in progress</h2></div></div><div id="home-flow"></div><p class="card-footnote">Counts represent records at each stage, not a single conversion funnel.</p></article></div>
         <article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRODUCTION</span><h2>Upcoming work orders</h2></div><button class="text-button" data-jump="jobs">View all work orders →</button></div><div id="home-jobs"></div></article>
+      </section>
+
+      <section id="reminders-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Deadline reminders</h2><p class="muted">Open deadlines across the portal, using India time. Completed work is excluded.</p></div><button id="refresh-reminders" class="secondary">Refresh</button></div><div id="reminder-summary" class="stats"></div><div class="section-heading"><label>Show<select id="reminder-filter"><option value="soon">Overdue and next 7 days</option><option value="all">All open deadlines</option><option value="overdue">Overdue only</option><option value="today">Due today</option></select></label></div><div id="reminder-list"></div><p class="help">Updates when opened or refreshed. Email, WhatsApp, SMS and background push delivery are not connected.</p></div>
+        <div class="section-card"><div class="section-heading"><h2>Add a custom deadline</h2></div><form id="reminder-form" class="points-entry-form"><label class="points-reason">Title<input name="title" maxlength="180" required></label><label>Deadline<input name="due_date" type="date" required></label><label class="points-reason">Notes<textarea name="notes" maxlength="2000" rows="2"></textarea></label><button class="primary">Add reminder</button></form></div>
       </section>
 
       <section id="overview-panel" class="panel-view" hidden>
