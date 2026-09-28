@@ -314,3 +314,44 @@ def test_employee_points_ledger_validation_permissions_and_corrections():
     assert admin.delete(f'/api/employees/{eid}', headers={'X-CSRF-Token':admin.csrf}).status_code == 409
     with module.DB() as db:
         assert len(db.scalars(module.select(module.AuditLog).where(module.AuditLog.action.like('employee_points_%'))).all()) == 4
+
+
+def test_policy_memos_half_points_rules_thresholds_and_exceptions_review():
+    admin=client()
+    eid=post(admin,'/api/employees',dict(code='memo1',name='Memo Worker',department='Service',pin='1234')).json['id']
+    worker=client('memo1','1234')
+    path=f'/api/employees/{eid}/memos'
+    day=module.now().astimezone(module.LOCAL).date().isoformat()
+    data=dict(date=day,rule_id='emergency_early',points=0.5,details='Unapproved early departure, reviewed.',reviewed=True)
+    assert worker.get(path).status_code==403
+    assert post(worker,path,data).status_code==403
+    assert post(admin,path,{**data,'reviewed':False}).status_code==400
+    for value in [1,0.25,True,-0.5]:
+        assert post(admin,path,{**data,'points':value}).status_code==400
+    first=post(admin,path,data)
+    assert first.status_code==201
+    assert post(admin,path,data).status_code==409
+    assert admin.get(path).json['total']==0.5
+    absence={**data,'rule_id':'absence_no_form','points':3,'details':'Full day absence reviewed with HR.'}
+    assert post(admin,path,absence).status_code==201
+    assert post(admin,path,{**absence,'rule_id':'absence_no_notice'}).status_code==409
+    assert post(admin,path,{**data,'rule_id':'cleanliness','points':2.5}).status_code==400
+    # Independent reviewed records used to exercise each threshold exactly.
+    for amount,expected in [(3,0),(3,0),(2.5,12),(3,12),(1,16),(3,16),(1,20)]:
+        payload={**data,'rule_id':'performance','points':amount,'details':f'Distinct verified incident at total stage {expected}, index {admin.get(path).json["total"]}'}
+        assert post(admin,path,payload).status_code==201
+        assert admin.get(path).json['threshold']==expected
+    result=admin.get(path).json
+    assert result['total']==20
+    assert result['monthly']==20
+    assert len(result['rules'])==11
+    voidpath=path+f'/{first.json["id"]}/void'
+    assert post(worker,voidpath,dict(reason='Correction')).status_code==403
+    assert post(admin,voidpath,dict(reason='Reviewed approved permission.')).status_code==200
+    assert post(admin,voidpath,dict(reason='Repeat correction')).status_code==409
+    result=admin.get(path).json
+    assert result['total']==19.5 and result['threshold']==16
+    assert any(r['voided_at'] for r in result['entries'])
+    assert admin.delete(f'/api/employees/{eid}',headers={'X-CSRF-Token':admin.csrf}).status_code==409
+    assert admin.get(path+'?month=2020-01').json['monthly']==0
+    assert admin.get(path+'?month=2020-01').json['total']==19.5
