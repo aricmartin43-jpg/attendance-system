@@ -69,3 +69,29 @@ dialog{width:min(600px,calc(100% - 32px));border:1px solid #e2e7ed;border-radius
 .machine-folder strong { font-size:1.15rem; }
 .machine-folder small { color:var(--muted,#64748b); }
 .machine-folder:hover { border-color:var(--accent,#2563eb); }
+
+/* Rounded, readable portal theme */
+:root{--ink:#172b3e;--text:#25384b;--muted:#5c6d7e;--line:#dce5eb;--paper:#f3f6f8;--orange:#d95d32;font-size:16px}
+body{color:var(--text);background:var(--paper)}
+.content{max-width:1600px;padding-top:36px}
+.page-heading h1{font-size:clamp(29px,2.4vw,38px);line-height:1.15;letter-spacing:-1.2px}
+.page-heading .muted{font-size:15px;line-height:1.55;color:var(--muted)}
+.section-card{border-radius:22px;border:1px solid var(--line);box-shadow:0 8px 26px #19324b08;overflow:hidden}
+.section-heading{padding:26px 28px}.section-heading h2{font-size:20px;line-height:1.25;font-weight:700}.section-heading .muted{font-size:14px;line-height:1.5;color:var(--muted)}
+.stats{gap:18px}.stat{border-radius:20px;padding:23px 24px;border:1px solid var(--line);box-shadow:0 7px 20px #19324b07;min-width:0}
+.stat>span{font-size:14px;line-height:1.4;color:#46596c;font-weight:650}.stat strong{font-size:clamp(28px,2.3vw,38px);margin:13px 0 7px;color:var(--ink)}.stat small{font-size:12px;line-height:1.5;color:var(--muted)}
+.home-intro{border-radius:23px;padding:32px 34px;background:#e8f0f2}.home-intro h2{font-size:29px}.home-intro p{font-size:14px;color:#4f6873}
+.sidebar{background:#182b3e}.nav-search input{border-radius:13px;font-size:14px;min-height:44px}
+.nav-group h2{font-size:11px;color:#a9b9c9}.nav-button{font-size:14px;line-height:1.35;padding:12px 14px;min-height:45px;border-radius:13px;color:#d1dce7}.nav-button.active{background:#e16a42}.nav-button:hover{background:#30465c}
+.topbar{font-size:14px}.topbar-company,.topbar #breadcrumb{font-size:13px}.account>span{font-size:13px}.account-avatar{width:38px;height:38px;font-size:12px!important}
+.primary,.secondary{border-radius:12px;font-size:14px;min-height:44px;padding:11px 17px}.primary{background:#d95d32;border-color:#d95d32}.primary:hover{background:#b84a27;border-color:#b84a27}.small-button{border-radius:10px;font-size:12px;min-height:36px;padding:8px 12px}.text-button{font-size:13px}
+.date-badge,.subtle-tag,.pill{border-radius:10px}.pill{font-size:12px;padding:6px 10px;white-space:nowrap}
+.table-wrap{overflow-x:auto}table{font-size:14px;line-height:1.45}th{font-size:12px;letter-spacing:.25px;text-transform:none;padding:15px 19px;color:#4c6173;background:#f5f8fa}td{font-size:13px;padding:17px 19px;color:#334a5f;vertical-align:top}td strong{font-size:14px;color:#1f3549}td small{font-size:12px;color:#63778a;line-height:1.45}.wrap-cell{line-height:1.55}
+.person-cell strong{font-size:14px}.person-cell small{font-size:12px}.avatar{width:38px;height:38px;border-radius:12px;font-size:12px}
+input,select,textarea{border-radius:12px;font-size:14px;min-height:44px;border-color:#cbd8e2;padding:12px 14px;color:#233a4e}textarea{line-height:1.5}label{font-size:13px;font-weight:650;color:#3b5267}.help{font-size:12px;line-height:1.6;color:var(--muted)}
+dialog{border-radius:23px;padding:30px;max-height:90dvh}.dialog-header h2{font-size:22px}
+.network-item strong{font-size:15px}.network-item span{font-size:13px;line-height:1.5}.network-item small{font-size:12px}.network-columns h3{font-size:12px;color:#52677a}
+.machine-folder{border-radius:20px;min-height:155px}.machine-folder strong{font-size:18px}.machine-folder small{font-size:13px}
+.attention-row strong,.flow-row{font-size:14px}.attention-row small,.flow-row small{font-size:12px}.attention-number{border-radius:11px}.flow-index{border-radius:9px}
+.login-card{max-width:420px}.login-card h2{font-size:38px}.login-card .muted{font-size:15px;line-height:1.55}.login-card label{font-size:14px}.login-card input{border-radius:13px}.login-card .primary{font-size:15px;min-height:50px}.login-note{border-radius:15px}.login-note p{font-size:12px}
+@media(max-width:760px){.content{padding:24px 15px}.page-heading h1{font-size:28px}.page-heading .muted{font-size:13px}.section-card{border-radius:18px}.section-heading{padding:21px}.section-heading h2{font-size:18px}.section-heading .muted{font-size:13px}.stat{border-radius:16px;padding:18px}.stat strong{font-size:29px}.stat>span{font-size:12px}.stat small{font-size:11px}.nav-button{font-size:14px}.topbar{height:66px}.home-intro{padding:24px;border-radius:19px}.home-intro h2{font-size:24px}th,td{padding:13px 15px}dialog{padding:22px}}
