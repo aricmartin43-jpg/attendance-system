@@ -2092,6 +2092,32 @@ def create_company_asset():
         db.add(a);db.flush();return asset_json(a),201
 
 
+@app.patch('/api/company-assets/<int:asset_id>')
+@login_required(admin=True)
+def update_company_asset(asset_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        a=db.get(CompanyAsset,asset_id)
+        if not a: abort(404,'Asset not found.')
+        if 'kind' in data:
+            if data['kind'] not in ('Machine','Bike'): abort(400,'Choose Machine or Bike.')
+            a.kind=data['kind']
+        for key,limit in {'code':60,'name':160,'model':120,'serial_or_registration':100,'location':100}.items():
+            if key in data:
+                value=str(data[key] or '').strip()
+                if len(value)>limit or (key in ('code','name') and not value): abort(400,'Invalid '+key+'.')
+                if key=='code':
+                    value=value.upper()
+                    if db.scalar(select(CompanyAsset.id).where(CompanyAsset.code==value,CompanyAsset.id!=asset_id)):
+                        abort(409,'Asset code already exists.')
+                setattr(a,key,value or None)
+        if 'next_service_date' in data:
+            a.next_service_date=valid_iso_date(data['next_service_date'],'next service date') if data['next_service_date'] else None
+        if 'active' in data: a.active=data['active'] is True
+        db.add(AuditLog(admin_id=request.employee.id,action='update_company_asset',target=str(a.id),detail=json.dumps(data)[:1000],created_at=now()))
+        return asset_json(a)
+
+
 @app.get('/api/maintenance-tasks')
 @login_required(admin=True)
 def list_maintenance_tasks():
@@ -2124,16 +2150,42 @@ def update_maintenance_task(task_id):
     with DB.begin() as db:
         t=db.get(MaintenanceTask,task_id)
         if not t: abort(404,'Task not found.')
+        if 'asset_id' in data:
+            try: asset_id=int(data['asset_id'])
+            except (TypeError,ValueError): abort(400,'Select an asset.')
+            if not db.get(CompanyAsset,asset_id): abort(404,'Asset not found.')
+            t.asset_id=asset_id
+        for key,limit in {'task_type':30,'description':5000}.items():
+            if key in data: setattr(t,key,clean_text(data,key,limit))
+        if 'due_date' in data:
+            t.due_date=valid_iso_date(data['due_date'],'due date') if data['due_date'] else None
         if 'status' in data:
             if data['status'] not in ('Open','In Progress','Completed'): abort(400,'Invalid status.')
             t.status=data['status']
-            if t.status=='Completed': t.completed_date=now().astimezone(LOCAL).date().isoformat()
+            if t.status=='Completed': t.completed_date=t.completed_date or now().astimezone(LOCAL).date().isoformat()
+            else: t.completed_date=None
+        if 'completed_date' in data:
+            if t.status=='Completed':
+                t.completed_date=valid_iso_date(data['completed_date'],'completion date') if data['completed_date'] else t.completed_date
+            else: t.completed_date=None
         for key in ('cost','downtime_hours'):
             if key in data: setattr(t,key,quantity(data[key]))
         if 'notes' in data: t.notes=str(data['notes'] or '')[:5000] or None
         db.add(AuditLog(admin_id=request.employee.id,action='update_maintenance_task',target=str(t.id),
                         detail=json.dumps(data)[:1000],created_at=now()))
         return {'id':t.id,'status':t.status}
+
+
+@app.get('/api/storage-summary')
+@login_required(admin=True)
+def storage_summary():
+    with DB() as db:
+        size=db.scalar(select(func.pg_database_size(func.current_database()))) if engine.dialect.name=='postgresql' else None
+        documents=db.scalar(select(func.count(PrivateDocument.id))) or 0
+        document_bytes=db.scalar(select(func.coalesce(func.sum(func.length(PrivateDocument.content)),0))) or 0
+        provider='Neon PostgreSQL' if '.neon.tech' in (engine.url.host or '') else engine.dialect.name
+        return dict(provider=provider,database_bytes=size,document_count=documents,
+                    document_bytes=document_bytes,upload_limit_bytes=2000000)
 
 
 @app.get('/api/management-summary')
