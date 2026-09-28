@@ -12,6 +12,8 @@ def initialise():
         for column in ('sub_category', 'size_dimension', 'material_finish'):
             if column not in existing:
                 connection.execute(text(f'ALTER TABLE stock_items ADD COLUMN {column} VARCHAR(80)'))
+        if 'service_product' not in {column['name'] for column in inspect(engine).get_columns('work_orders')}:
+            connection.execute(text('ALTER TABLE work_orders ADD COLUMN service_product VARCHAR(180)'))
     admin_code = os.getenv('ADMIN_USERNAME', 'admin').lower().strip()
     admin_pin = os.getenv('ADMIN_PIN', '').strip()
     if not re.fullmatch(r'\d{4}', admin_pin):
