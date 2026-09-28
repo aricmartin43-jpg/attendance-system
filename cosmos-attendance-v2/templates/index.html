@@ -79,6 +79,11 @@
       <section id="jobs-panel" class="panel-view" hidden>
         <div class="section-card"><div class="section-heading"><div><h2>Work orders</h2><p class="muted">Customer work linked to machine, owner, assigned employees, supervisor and approval.</p></div><button class="primary" id="add-job">+ Create work order</button></div><div id="job-table"></div></div>
       </section>
+      <section id="planning-panel" class="panel-view" hidden>
+        <div class="section-card"><div class="section-heading"><div><h2>Daily work plan</h2><p class="muted">Plan upcoming work and assign it to registered employees. Automatic assignment chooses the lowest planned hours in the selected department; review availability before confirming.</p></div><button class="primary" id="add-plan">+ Plan work</button></div>
+          <label class="compact-label">Plan date<input id="plan-date" type="date"></label><div id="plan-summary" class="stats"></div><div id="plan-table"></div>
+        </div>
+      </section>
       <section id="quotations-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Quotations</h2><p class="muted">Follow up enquiries and convert an accepted quote into a work order.</p></div><button class="primary" id="add-quotation">+ Quotation</button></div><div id="quotation-table"></div></div></section>
       <section id="job-files-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Job file</h2><p class="muted">Materials, drawings, inspection, documents and dispatch in one place.</p></div><button class="secondary" id="print-job-card">Print QR job card</button></div><label>Work order<select id="job-file-select"></select></label><div class="action-buttons"><button class="secondary" id="add-job-material">+ Material</button><button class="secondary" id="add-job-drawing">+ Drawing revision</button><button class="secondary" id="upload-job-document">+ Document</button><button class="secondary" id="add-quality">+ Quality check</button><button class="primary" id="add-dispatch">+ Dispatch</button></div><div id="job-material-table"></div><div id="job-drawing-table"></div><div id="job-documents"></div><div id="job-quality"></div><div id="job-dispatch"></div></div></section>
 
@@ -167,6 +172,17 @@
     <label>Assigned employee<select name="assigned_employee_id" id="job-assigned"></select></label>
     <div class="form-grid"><label>Start date<input name="start_date" type="date"></label><label>Target date<input name="target_date" type="date"></label></div>
     <button class="primary wide" type="submit">Create work order</button>
+  </form></dialog>
+
+  <dialog id="plan-dialog"><form id="plan-form"><div class="dialog-header"><h2>Plan upcoming work</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+    <label>Work date<input name="date" id="plan-form-date" type="date" required></label>
+    <label>Task<input name="title" maxlength="180" required placeholder="Bend conveyor side panels"></label>
+    <label>Details<textarea name="details" maxlength="5000" rows="3" placeholder="Quantity, drawing, process and expected output"></textarea></label>
+    <div class="form-grid"><label>Department<select name="department" id="plan-department"><option value="">Any department</option></select></label><label>Estimated hours<input name="estimated_hours" type="number" min="0.25" max="24" step="0.25" value="2" required></label></div>
+    <label>Employee<select name="employee_id" id="plan-employee"><option value="">Assign automatically by planned hours</option></select></label>
+    <div class="form-grid"><label>Related work order<select name="work_order_id" id="plan-work-order"><option value="">No work order</option></select></label><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
+    <p class="help">Automatic assignment uses planned hours only. Check leave, skills, and machine availability before saving.</p>
+    <button class="primary wide" type="submit">Save work plan</button>
   </form></dialog>
 
   <dialog id="work-dialog"><form id="work-form"><div class="dialog-header"><h2>Add work report</h2><button type="button" class="close-dialog" aria-label="Close">×</button></div>
