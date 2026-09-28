@@ -29,13 +29,18 @@
     <main class="content">
       <div class="page-heading"><div><span class="eyebrow accent">COSMOS ENGINEERING SOLUTIONS</span><h1 id="page-title">Attendance overview</h1><p id="page-subtitle" class="muted">A clear view of your team's working day.</p></div><div class="date-badge" id="today-label"></div></div>
       <section id="home-panel" class="panel-view" hidden>
-        <div class="home-intro"><div><span class="eyebrow">TODAY AT COSMOS</span><h2>Keep the work moving.</h2><p>See what needs attention and take the next step.</p></div><div class="home-actions"><button class="primary" data-home-action="quote">+ New quotation</button><button class="secondary" data-home-action="job">+ Work order</button></div></div>
         <div id="home-metrics" class="stats"></div>
         <div id="home-progress-rings" class="progress-ring-grid"></div>
-        <div class="dashboard-chart-grid">
-          <article class="section-card"><div class="section-heading"><h2>Employees by department</h2></div><div id="home-department-chart" class="dashboard-chart-body"></div></article>
-          <article class="section-card"><div class="section-heading"><h2>Work order status</h2></div><div id="home-status-chart" class="dashboard-chart-body"></div><p class="card-footnote">Latest work orders loaded by the portal (up to 300).</p></article>
-          <article class="section-card"><div class="section-heading"><h2>Quick actions</h2></div><div class="dashboard-shortcuts"><button data-home-view="employees">Employees</button><button data-home-view="planning">Plan work</button><button data-home-view="customers">Customers</button><button data-home-view="inventory">Inventory</button><button data-home-view="maintenance">Maintenance</button><button data-home-view="analytics">Reports & storage</button></div></article>
+        <div class="dashboard-chart-grid dashboard-main-grid">
+          <article class="section-card"><div class="section-heading"><h2>Employee attendance</h2><span class="subtle-tag">Last 7 days</span></div><div id="home-week-chart"></div><p class="card-footnote">Daily check-ins ÷ current active employees.</p></article>
+          <article class="section-card"><div class="section-heading"><h2>Department wise employees</h2></div><div id="home-department-chart" class="dashboard-chart-body"></div></article>
+          <article class="section-card"><div class="section-heading"><h2>Work order status</h2></div><div id="home-status-chart" class="dashboard-chart-body"></div><p class="card-footnote">Latest available orders (up to 300).</p></article>
+          <article class="section-card"><div class="section-heading"><h2>Team attendance</h2><button class="text-button" data-home-view="employees">View profiles →</button></div><div id="home-team-table"></div></article>
+          <article class="section-card"><div class="section-heading"><h2>Tasks overview</h2><span class="subtle-tag">Today</span></div><div id="home-task-chart" class="dashboard-chart-body"></div></article>
+          <article class="section-card"><div class="section-heading"><h2>Attendance status</h2><span class="subtle-tag">Today</span></div><div id="home-attendance-chart" class="dashboard-chart-body"></div></article>
+          <article class="section-card"><div class="section-heading"><h2>Recent check-ins</h2><button class="text-button" data-home-view="overview">View all →</button></div><div id="home-recent"></div></article>
+          <article class="section-card"><div class="section-heading"><h2>Maintenance overview</h2></div><div id="home-maintenance-chart" class="dashboard-chart-body"></div><p class="card-footnote">Recorded service tasks, across available assets.</p></article>
+          <article class="section-card"><div class="section-heading"><h2>Quick actions</h2></div><div id="home-shortcuts" class="dashboard-shortcuts"></div></article>
         </div>
         <div class="home-grid"><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRIORITIES</span><h2>Needs your attention</h2></div><span class="subtle-tag">Live records</span></div><div id="home-attention"></div></article><article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">QUOTE TO DELIVERY</span><h2>Work in progress</h2></div></div><div id="home-flow"></div><p class="card-footnote">Counts represent records at each stage, not a single conversion funnel.</p></article></div>
         <article class="section-card"><div class="section-heading"><div><span class="eyebrow accent">PRODUCTION</span><h2>Upcoming work orders</h2></div><button class="text-button" data-jump="jobs">View all work orders →</button></div><div id="home-jobs"></div></article>
