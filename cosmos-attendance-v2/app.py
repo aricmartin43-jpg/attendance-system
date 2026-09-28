@@ -120,6 +120,17 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DeadlineReminder(Base):
+    __tablename__ = 'deadline_reminders'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(180))
+    due_date: Mapped[str] = mapped_column(String(10), index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class EmployeeMemo(Base):
     __tablename__ = 'employee_memos'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -2363,6 +2374,59 @@ def storage_summary():
         provider='Neon PostgreSQL' if '.neon.tech' in (engine.url.host or '') else engine.dialect.name
         return dict(provider=provider,database_bytes=size,document_count=documents,
                     document_bytes=document_bytes,upload_limit_bytes=2000000)
+
+
+@app.route('/api/deadline-reminders',methods=['GET','POST'])
+@login_required(admin=True)
+def deadline_reminders():
+    with DB.begin() as db:
+        if request.method=='POST':
+            data=request.get_json() or {}
+            title=str(data.get('title') or '').strip()
+            notes=str(data.get('notes') or '').strip()
+            if not 1<=len(title)<=180 or len(notes)>2000: abort(400,'Enter a title up to 180 characters and notes up to 2000 characters.')
+            due=valid_iso_date(data.get('due_date'),'deadline')
+            r=DeadlineReminder(title=title,due_date=due,notes=notes,created_by=request.employee.id,created_at=now())
+            db.add(r);db.flush()
+            db.add(AuditLog(admin_id=request.employee.id,action='reminder_created',target=str(r.id),detail=title,created_at=now()))
+            return dict(id=r.id),201
+        today=now().astimezone(LOCAL).date()
+        rows=[]
+        def add(kind,r,date,title,view):
+            if not date:return
+            try: remaining=(datetime.strptime(date,'%Y-%m-%d').date()-today).days
+            except (ValueError,TypeError):return
+            rows.append(dict(key=f'{kind}:{r.id}',id=r.id,kind=kind,title=title,due_date=date,days=remaining,view=view,
+                             urgency='Overdue' if remaining<0 else 'Due today' if remaining==0 else 'Due tomorrow' if remaining==1 else 'Next 7 days' if remaining<=7 else 'Upcoming',
+                             notes=r.notes if kind=='Custom' else None))
+        for r in db.scalars(select(WorkOrder).where(WorkOrder.status.notin_(['Completed','Closed','Cancelled']))):add('Work order',r,r.target_date,r.code+' · '+r.title,'jobs')
+        for r in db.scalars(select(DailyPlan).where(DailyPlan.status.notin_(['Completed','Cancelled']))):add('Planned task',r,r.work_date,r.title,'planning')
+        for r in db.scalars(select(ProductionStep).where(ProductionStep.status.notin_(['Completed','Cancelled']))):add('Production',r,r.planned_date,f'Order #{r.work_order_id} · '+r.operation,'production')
+        for r in db.scalars(select(MaintenanceTask).where(MaintenanceTask.status.notin_(['Completed','Cancelled']))):add('Maintenance',r,r.due_date,r.description,'maintenance')
+        for r in db.scalars(select(CompanyAsset).where(CompanyAsset.active==True)):add('Asset service',r,r.next_service_date,r.code+' · '+r.name,'maintenance')
+        for r in db.scalars(select(PurchaseOrder).where(PurchaseOrder.status.notin_(['Received','Cancelled']))):add('Purchase delivery',r,r.expected_date,f'Purchase order #{r.id}','purchasing')
+        for r in db.scalars(select(Quotation).where(Quotation.status.notin_(['Accepted','Lost','Cancelled']))):
+            add('Quotation follow-up',r,r.follow_up_date,r.code+' · '+r.title,'quotations')
+            add('Quotation promised date',r,r.promised_date,r.code+' · '+r.title,'quotations')
+        for r in db.scalars(select(MeetingAction).where(MeetingAction.status.notin_(['Completed','Closed','Cancelled','Done']))):add('Meeting action',r,r.due_date,r.action,'meetings')
+        for r in db.scalars(select(DeadlineReminder).where(DeadlineReminder.completed==False)):add('Custom',r,r.due_date,r.title,'reminders')
+        rows.sort(key=lambda r:(r['due_date'],r['kind'],r['id']))
+        return dict(today=today.isoformat(),timezone=str(LOCAL),items=rows,overdue=sum(r['days']<0 for r in rows),due_today=sum(r['days']==0 for r in rows),next_week=sum(0<r['days']<=7 for r in rows))
+
+
+@app.patch('/api/deadline-reminders/<int:reminder_id>')
+@login_required(admin=True)
+def update_deadline_reminder(reminder_id):
+    data=request.get_json() or {}
+    with DB.begin() as db:
+        r=db.get(DeadlineReminder,reminder_id)
+        if not r:abort(404,'Reminder not found.')
+        if 'completed' in data:
+            if type(data['completed']) is not bool:abort(400,'Choose a valid completion status.')
+            r.completed=data['completed']
+        if 'due_date' in data:r.due_date=valid_iso_date(data['due_date'],'deadline')
+        db.add(AuditLog(admin_id=request.employee.id,action='reminder_updated',target=str(r.id),detail=json.dumps(data),created_at=now()))
+    return dict(ok=True)
 
 
 @app.get('/api/management-summary')
