@@ -349,6 +349,20 @@ function moduleIcon(view){
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
 }
 function closeNavigation(){document.body.classList.remove('navigation-open');$('navigation-backdrop').hidden=true;$('open-navigation').setAttribute('aria-expanded','false');}
+let deadlineItems=[];
+async function refreshReminderBadge(){const data=await api('/api/deadline-reminders');$('home-reminder-alert').textContent=`Deadline reminders: ${data.overdue} overdue · ${data.due_today} due today · ${data.next_week} in the next 7 days →`;}
+async function refreshReminders(){
+  const data=await api('/api/deadline-reminders');deadlineItems=data.items;
+  $('reminder-summary').innerHTML=[['Overdue',data.overdue],['Due today',data.due_today],['Next 7 days',data.next_week],['All open deadlines',data.items.length]].map(([label,n])=>`<article class="stat"><span>${label}</span><strong>${n}</strong></article>`).join('');renderReminders();
+}
+function renderReminders(){
+  const filter=$('reminder-filter').value,rows=deadlineItems.filter(r=>filter==='all'||(filter==='overdue'?r.days<0:filter==='today'?r.days===0:r.days<=7));
+  $('reminder-list').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Deadline</th><th>Status</th><th>Type</th><th>Work / reminder</th><th>Action</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.due_date)}</td><td><span class="pill">${escapeHTML(r.urgency)}</span><small>${r.days<0?Math.abs(r.days)+' days overdue':r.days===0?'Today':'In '+r.days+' days'}</small></td><td>${escapeHTML(r.kind)}</td><td><strong>${escapeHTML(r.title)}</strong><small>${escapeHTML(r.notes||'')}</small><small>Record #${r.id}</small></td><td>${r.kind==='Custom'?`<button class="small-button" data-reminder-complete="${r.id}">Complete</button><button class="small-button" data-reminder-date="${r.id}">Change date</button>`:`<button class="small-button" data-reminder-view="${r.view}">Open module</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="help">No open deadlines match this filter.</p>';
+}
+$('refresh-reminders').addEventListener('click',()=>perform(refreshReminders));
+$('reminder-filter').addEventListener('change',renderReminders);
+$('reminder-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target,button=form.querySelector('button');if(button.disabled)return;button.disabled=true;perform(async()=>{try{await api('/api/deadline-reminders','POST',Object.fromEntries(new FormData(form)));form.reset();$('reminder-filter').value='all';await refreshReminders();notice('Deadline reminder added.');}finally{button.disabled=false;}});});
+$('reminder-list').addEventListener('click',e=>perform(async()=>{const view=e.target.closest('[data-reminder-view]'),done=e.target.closest('[data-reminder-complete]'),date=e.target.closest('[data-reminder-date]');if(view)return navigate(view.dataset.reminderView);if(done){await api('/api/deadline-reminders/'+done.dataset.reminderComplete,'PATCH',{completed:true});await refreshReminders();}if(date){const r=deadlineItems.find(r=>r.kind==='Custom'&&r.id===Number(date.dataset.reminderDate));const value=prompt('New deadline (YYYY-MM-DD)',r.due_date);if(value===null)return;await api('/api/deadline-reminders/'+r.id,'PATCH',{due_date:value});await refreshReminders();}}));
 async function refreshHome(){
   $('home-metrics').innerHTML='<p class="muted">Loading your workspace…</p>';
   const [summary,orders,quotes,stock,purchases]=await Promise.all([api('/api/management-summary'),api('/api/work-orders'),api('/api/quotations'),api('/api/stock-items'),api('/api/purchase-orders')]);
@@ -398,6 +412,7 @@ async function refreshHome(){
 }
 
 const views = {
+  reminders:['Deadline reminders','Track overdue work, upcoming dates and custom reminders.','◷'],
   home:['Employee Portal','People · Productivity · Progress','▦'],
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
   ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
@@ -427,7 +442,8 @@ async function navigate(view) {
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
   document.querySelectorAll('.nav-button').forEach(el => {el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
   $('page-title').textContent=views[view][0]; $('page-subtitle').textContent=views[view][1]; $('breadcrumb').textContent=views[view][0];
-  if(view === 'home') await refreshHome();
+  if(view === 'home') {await refreshHome();await refreshReminderBadge();}
+  if(view === 'reminders') await refreshReminders();
   if(view === 'overview') await refreshOverview();
   if(view === 'ecosystem') await refreshEcosystem();
   if(view === 'employees') await refreshEmployees();
@@ -455,7 +471,7 @@ async function showApp() {
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7); $('plan-date').value=today;
   const groups=user.admin?[
-    ['Workspace',['home']],['Sales & customers',['customers','quotations','machines']],
+    ['Workspace',['home','reminders']],['Sales & customers',['customers','quotations','machines']],
     ['Operations',['planning','jobs','job-files','production','inventory','purchasing','maintenance']],
     ['People & collaboration',['overview','employees','work','issues','meetings']],
     ['Insights',['analytics','reports','ecosystem']]
