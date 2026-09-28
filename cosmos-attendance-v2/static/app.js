@@ -370,9 +370,15 @@ $('export').addEventListener('click',()=>perform(async()=>{
 
 
 $('add-customer').addEventListener('click',()=>perform(openCustomerDialog));
-$('add-stock-item').addEventListener('click',()=>{$('stock-form').reset();$('stock-form').elements.sku.disabled=false;$('stock-dialog').showModal();});
+function updateStockNamePreview(){
+  const form=$('stock-form');
+  $('stock-name-preview').textContent=['category','sub_category','size_dimension','material_finish'].map(k=>form.elements[k].value.trim()||'…').join(' - ');
+}
+$('stock-form').addEventListener('input',updateStockNamePreview);
+$('stock-form').addEventListener('change',updateStockNamePreview);
+$('add-stock-item').addEventListener('click',()=>{$('stock-form').reset();$('stock-form').elements.sku.disabled=false;for(const k of ['sub_category','size_dimension','material_finish'])$('stock-form').elements[k].required=true;updateStockNamePreview();$('stock-dialog').showModal();});
 $('stock-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api(id?'/api/stock-items/'+id:'/api/stock-items',id?'PATCH':'POST',d);$('stock-dialog').close();await refreshStock();notice('Stock item saved.');});});
-$('stock-table').addEventListener('click',e=>perform(async()=>{const h=e.target.closest('[data-stock-history]'),m=e.target.closest('[data-stock-move]'),ed=e.target.closest('[data-stock-edit]');if(h)return showStockHistory(h.dataset.stockHistory);if(m){$('movement-form').reset();$('movement-form').elements.item_id.value=m.dataset.stockMove;$('movement-dialog').showModal();}if(ed){const x=stockItems.find(i=>i.id===Number(ed.dataset.stockEdit)),f=$('stock-form');f.reset();for(const k of ['sku','name','category','unit','specification','location','reorder_level'])f.elements[k].value=x[k]||'';f.elements.item_id.value=x.id;f.elements.sku.disabled=true;$('stock-dialog').showModal();}}));
+$('stock-table').addEventListener('click',e=>perform(async()=>{const h=e.target.closest('[data-stock-history]'),m=e.target.closest('[data-stock-move]'),ed=e.target.closest('[data-stock-edit]');if(h)return showStockHistory(h.dataset.stockHistory);if(m){$('movement-form').reset();$('movement-form').elements.item_id.value=m.dataset.stockMove;$('movement-dialog').showModal();}if(ed){const x=stockItems.find(i=>i.id===Number(ed.dataset.stockEdit)),f=$('stock-form');f.reset();for(const k of ['sku','category','sub_category','size_dimension','material_finish','unit','specification','location','reorder_level'])f.elements[k].value=x[k]||'';for(const k of ['sub_category','size_dimension','material_finish'])f.elements[k].required=Boolean(x.sub_category);f.elements.item_id.value=x.id;f.elements.sku.disabled=true;updateStockNamePreview();$('stock-dialog').showModal();}}));
 $('movement-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.item_id;delete d.item_id;await api('/api/stock-items/'+id+'/movements','POST',d);$('movement-dialog').close();await refreshStock();await showStockHistory(id);notice('Stock movement recorded.');});});
 $('add-supplier').addEventListener('click',()=>{$('supplier-form').reset();$('supplier-dialog').showModal();});
 $('supplier-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/suppliers','POST',Object.fromEntries(new FormData(e.currentTarget)));$('supplier-dialog').close();await refreshPurchasing();notice('Supplier saved.');});});
