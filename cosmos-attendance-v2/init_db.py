@@ -1,11 +1,17 @@
 import os
 import re
-from sqlalchemy import select
+from sqlalchemy import select, inspect, text
 from werkzeug.security import generate_password_hash
 from app import Base, engine, DB, Employee
 
 def initialise():
     Base.metadata.create_all(engine)
+    # Existing installations already have stock_items; create_all does not add columns.
+    existing = {column['name'] for column in inspect(engine).get_columns('stock_items')}
+    with engine.begin() as connection:
+        for column in ('sub_category', 'size_dimension', 'material_finish'):
+            if column not in existing:
+                connection.execute(text(f'ALTER TABLE stock_items ADD COLUMN {column} VARCHAR(80)'))
     admin_code = os.getenv('ADMIN_USERNAME', 'admin').lower().strip()
     admin_pin = os.getenv('ADMIN_PIN', '').strip()
     if not re.fullmatch(r'\d{4}', admin_pin):
