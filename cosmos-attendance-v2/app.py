@@ -120,6 +120,21 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class EmployeePoint(Base):
+    __tablename__ = 'employee_points'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey('employees.id'), index=True)
+    event_date: Mapped[str] = mapped_column(String(10), index=True)
+    category: Mapped[str] = mapped_column(String(40))
+    points: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text)
+    recorded_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    voided_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class EmployeeProfile(Base):
     __tablename__ = 'employee_profiles'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -728,7 +743,7 @@ def delete_employee(employee_id):
             or db.scalar(select(WorkIssue.id).where(WorkIssue.employee_id == e.id).limit(1))
             or db.scalar(select(MeetingAction.id).where(MeetingAction.employee_id == e.id).limit(1))
         )
-        if has_memory:
+        if has_memory or db.scalar(select(EmployeePoint.id).where(EmployeePoint.employee_id == e.id).limit(1)):
             abort(409, 'This employee has company-memory records. Deactivate the account instead of permanently removing it.')
         if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.out_at == None)):
             abort(409, 'This employee must check out before removal.')
@@ -1935,6 +1950,71 @@ def receive_purchase_order(order_id):
         db.add(AuditLog(admin_id=request.employee.id,action='receive_purchase_order',target=f'PO-{p.id}',
                         detail=f'{amount} {item.unit}',created_at=now()))
         return dict(id=p.id,status=p.status,received_qty=str(p.received_qty),balance=str(item.quantity))
+
+
+POINT_CATEGORIES = ['Work performance', 'Attendance', 'Behaviour', 'Cleanliness', 'Discipline', 'Safety', 'Teamwork', 'Initiative', 'Other']
+
+
+@app.route('/api/employees/<int:employee_id>/points', methods=['GET', 'POST'])
+@login_required(admin=True)
+def employee_points(employee_id):
+    with DB.begin() as db:
+        employee = db.get(Employee, employee_id)
+        if not employee or employee.admin: abort(404, 'Employee not found.')
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            value = data.get('points')
+            if type(value) is not int or value == 0 or abs(value) > 100:
+                abort(400, 'Enter whole points from 1 to 100 to award or deduct.')
+            category = data.get('category')
+            if category not in POINT_CATEGORIES: abort(400, 'Choose a points category.')
+            reason = str(data.get('reason') or '').strip()
+            if not 3 <= len(reason) <= 1000: abort(400, 'Enter a reason between 3 and 1000 characters.')
+            event_date = str(data.get('date') or '')
+            try:
+                parsed = datetime.strptime(event_date, '%Y-%m-%d').date()
+                if parsed.isoformat() != event_date or parsed > now().astimezone(LOCAL).date(): raise ValueError()
+            except ValueError: abort(400, 'Choose today or an earlier valid date.')
+            entry = EmployeePoint(employee_id=employee_id,event_date=event_date,category=category,
+                                  points=value,reason=reason,recorded_by=request.employee.name,created_at=now())
+            db.add(entry)
+            db.flush()
+            db.add(AuditLog(admin_id=request.employee.id,action='employee_points_added',target=str(employee_id),
+                            detail=json.dumps(dict(entry_id=entry.id,points=value,category=category,reason=reason)),created_at=now()))
+            return dict(id=entry.id), 201
+        month = request.args.get('month') or now().astimezone(LOCAL).strftime('%Y-%m')
+        try:
+            if datetime.strptime(month, '%Y-%m').strftime('%Y-%m') != month: raise ValueError()
+        except ValueError: abort(400, 'Choose a valid month.')
+        rows = db.scalars(select(EmployeePoint).where(EmployeePoint.employee_id==employee_id,
+                          EmployeePoint.event_date.startswith(month+'-')).order_by(EmployeePoint.event_date.desc(),EmployeePoint.id.desc())).all()
+        valid = [r for r in rows if r.voided_at is None]
+        awarded = sum(r.points for r in valid if r.points>0)
+        deducted = -sum(r.points for r in valid if r.points<0)
+        all_time = db.scalar(select(func.coalesce(func.sum(EmployeePoint.points),0)).where(
+            EmployeePoint.employee_id==employee_id,EmployeePoint.voided_at==None))
+        return dict(month=month,categories=POINT_CATEGORIES,awarded=awarded,deducted=deducted,net=awarded-deducted,
+                    all_time=all_time,by_category=[dict(category=c,points=sum(r.points for r in valid if r.category==c)) for c in POINT_CATEGORIES],
+                    entries=[dict(id=r.id,date=r.event_date,category=r.category,points=r.points,reason=r.reason,
+                                  recorded_by=r.recorded_by,created_at=aware(r.created_at).isoformat(),void_reason=r.void_reason,
+                                  voided_by=r.voided_by,voided_at=aware(r.voided_at).isoformat() if r.voided_at else None) for r in rows])
+
+
+@app.post('/api/employees/<int:employee_id>/points/<int:entry_id>/void')
+@login_required(admin=True)
+def void_employee_points(employee_id, entry_id):
+    reason = str((request.get_json() or {}).get('reason') or '').strip()
+    if not 3 <= len(reason) <= 1000: abort(400, 'Enter a correction reason between 3 and 1000 characters.')
+    with DB.begin() as db:
+        entry = db.scalar(select(EmployeePoint).where(EmployeePoint.id==entry_id,EmployeePoint.employee_id==employee_id).with_for_update())
+        if not entry: abort(404, 'Points entry not found.')
+        if entry.voided_at: abort(409, 'This entry has already been voided.')
+        entry.voided_at=now()
+        entry.voided_by=request.employee.name
+        entry.void_reason=reason
+        db.add(AuditLog(admin_id=request.employee.id,action='employee_points_voided',target=str(employee_id),
+                       detail=json.dumps(dict(entry_id=entry_id,reason=reason)),created_at=now()))
+    return dict(ok=True)
 
 
 @app.get('/api/employees/<int:employee_id>/profile')
