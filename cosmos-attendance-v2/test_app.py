@@ -96,7 +96,7 @@ def test_customer_and_contact_edits_preserve_history_and_permissions():
 
 def test_inventory_purchase_receipt_and_stock_ledger():
     admin=client()
-    item=post(admin,'/api/stock-items',{'sku':'CR-2MM','name':'2 mm CR sheet','unit':'kg','reorder_level':'10'}).json
+    item=post(admin,'/api/stock-items',{'sku':'CR-2MM','category':'Raw material','sub_category':'Sheet','size_dimension':'2 mm','material_finish':'CR','unit':'kg','reorder_level':'10'}).json
     supplier=post(admin,'/api/suppliers',{'name':'Steel Supplier'}).json
     po=post(admin,'/api/purchase-orders',{'supplier_id':supplier['id'],'item_id':item['id'],
                                           'ordered_qty':'20','unit_price':'80'}).json
@@ -122,7 +122,7 @@ def test_employee_file_production_maintenance_and_summary():
     step=post(admin,'/api/production-steps',{'work_order_id':job['id'],'operation':'Laser cutting','sequence':1}).json
     assert patch(f'/api/production-steps/{step["id"]}',{'status':'Blocked','delay_reason':'Sheet shortage'}).status_code==200
     asset=post(admin,'/api/company-assets',{'code':'BIKE-01','kind':'Bike','name':'Service bike'}).json
-    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Service','description':'Oil change'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Preventive','description':'Oil change'}).json
     assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Completed','cost':'800','downtime_hours':'2'}).status_code==200
     summary=admin.get('/api/management-summary').json
     assert summary['open_jobs']==1 and summary['blocked_steps']==1 and summary['open_maintenance']==0

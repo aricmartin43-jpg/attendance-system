@@ -20,7 +20,7 @@ from flask import Flask, Response, abort, jsonify, render_template, request, ses
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, LargeBinary, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, Numeric, LargeBinary, String, Text, ForeignKey, create_engine, select, delete, UniqueConstraint, func, or_, update
 import qrcode
 import qrcode.image.svg
 from decimal import Decimal, InvalidOperation
@@ -191,6 +191,8 @@ class WorkReport(Base):
     supervisor_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    service_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    service_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class WorkIssue(Base):
@@ -213,7 +215,7 @@ class Meeting(Base):
     meeting_date: Mapped[str] = mapped_column(String(10), index=True)
     title: Mapped[str] = mapped_column(String(160))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -256,6 +258,11 @@ class DailyPlan(Base):
     priority: Mapped[str] = mapped_column(String(20), default='Normal')
     status: Mapped[str] = mapped_column(String(20), default='Planned')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    service_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    service_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey('customers.id'), nullable=True, index=True)
+    machine_id: Mapped[int | None] = mapped_column(ForeignKey('customer_machines.id'), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class CustomerSite(Base):
@@ -308,6 +315,9 @@ class CustomerMachine(Base):
     status: Mapped[str] = mapped_column(String(30), default='Active')
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    specifications: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_service_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    next_service_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class WorkOrder(Base):
@@ -330,6 +340,10 @@ class WorkOrder(Base):
     status: Mapped[str] = mapped_column(String(30), default='Open')
     priority: Mapped[str] = mapped_column(String(20), default='Normal')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    service_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    service_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_stage: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    customer_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class WorkOrderAssignment(Base):
@@ -379,7 +393,7 @@ class StockMovement(Base):
     work_order_id: Mapped[int | None] = mapped_column(ForeignKey('work_orders.id'), nullable=True)
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str] = mapped_column(String(500))
-    actor_id: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -404,8 +418,10 @@ class PurchaseOrder(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14,2), default=0)
     status: Mapped[str] = mapped_column(String(20), default='Open')
     expected_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    supplier_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ProductionStep(Base):
@@ -451,6 +467,11 @@ class MaintenanceTask(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     assigned_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    service_activities: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checklist: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parts_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_service_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class Quotation(Base):
@@ -503,7 +524,7 @@ class PrivateDocument(Base):
     filename: Mapped[str] = mapped_column(String(180))
     mime: Mapped[str] = mapped_column(String(100))
     content: Mapped[bytes] = mapped_column(LargeBinary)
-    uploaded_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -517,7 +538,7 @@ class QualityCheck(Base):
     rejected_qty: Mapped[Decimal] = mapped_column(Numeric(14,3))
     result: Mapped[str] = mapped_column(String(20))
     defect: Mapped[str | None] = mapped_column(Text, nullable=True)
-    inspector_id: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    inspector_id: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -531,8 +552,23 @@ class DispatchRecord(Base):
     tracking_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
     delivery_note: Mapped[str | None] = mapped_column(String(120), nullable=True)
     proof_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_by: Mapped[int] = mapped_column(ForeignKey('employees.id'))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CustomerUpdate(Base):
+    __tablename__ = 'customer_updates'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(String(250))
+    recipient_email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    recipient_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default='Draft')
+    channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('employees.id'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 app = Flask(__name__)
@@ -764,30 +800,7 @@ def reset_face(employee_id):
 @app.delete('/api/employees/<int:employee_id>')
 @login_required(admin=True)
 def delete_employee(employee_id):
-    photos=[]
-    with DB.begin() as db:
-        e = db.get(Employee, employee_id)
-        if not e or e.admin:
-            abort(404)
-        has_memory = (
-            db.scalar(select(WorkReport.id).where(WorkReport.employee_id == e.id).limit(1))
-            or db.scalar(select(WorkIssue.id).where(WorkIssue.employee_id == e.id).limit(1))
-            or db.scalar(select(MeetingAction.id).where(MeetingAction.employee_id == e.id).limit(1))
-        )
-        if has_memory or db.scalar(select(EmployeeMemo.id).where(EmployeeMemo.employee_id == e.id).limit(1)) or db.scalar(select(EmployeePoint.id).where(EmployeePoint.employee_id == e.id).limit(1)):
-            abort(409, 'This employee has company-memory records. Deactivate the account instead of permanently removing it.')
-        if db.scalar(select(Attendance.id).where(Attendance.employee_id == e.id, Attendance.out_at == None)):
-            abort(409, 'This employee must check out before removal.')
-        rows=db.scalars(select(Attendance).where(Attendance.employee_id == e.id)).all()
-        for r in rows:
-            photos.extend([r.in_photo, r.out_photo])
-        photos.append(e.photo_id)
-        db.execute(delete(Attendance).where(Attendance.employee_id == e.id))
-        db.delete(e)
-        db.add(AuditLog(admin_id=request.employee.id, action='delete_employee', target=e.code, detail=None, created_at=now()))
-    for photo in photos:
-        remove_photo(photo)
-    return {'ok': True}
+    return permanently_delete_employee(employee_id)
 
 
 @app.post('/api/employees/<int:employee_id>/active')
@@ -1035,7 +1048,7 @@ def work_report_json(r, e):
     return dict(id=r.id, employee_id=e.id, employee=e.name, code=e.code, department=e.department,
                 date=r.work_date, job_no=r.job_no, customer=r.customer, work_details=r.work_details,
                 machine=r.machine, status=r.status, problems=r.problems, supervisor_note=r.supervisor_note,
-                verified_by=r.verified_by, created_at=aware(r.created_at).isoformat())
+                verified_by=r.verified_by,service_type=r.service_type,service_activities=json_list(r.service_activities), created_at=aware(r.created_at).isoformat())
 
 
 def issue_json(r, e):
@@ -1087,20 +1100,21 @@ def create_work_report():
     if not details:
         abort(400, 'Work details are required.')
     status = str(data.get('status','Completed')).strip()[:30] or 'Completed'
+    if status not in (*PLAN_STATUSES,'Pending'):abort(400,'Choose a listed work status.')
     with DB.begin() as db:
         r = WorkReport(employee_id=employee_id, work_date=work_date,
                        job_no=str(data.get('job_no','')).strip()[:60] or None,
                        customer=str(data.get('customer','')).strip()[:120] or None,
                        work_details=details[:5000],
                        machine=str(data.get('machine','')).strip()[:120] or None,
-                       status=status,
+                       status=status,**service_fields(data),
                        problems=str(data.get('problems','')).strip()[:5000] or None,
                        created_at=now())
         db.add(r); db.flush()
         link_order = data.get('work_order_id')
         link_machine = data.get('machine_id')
-        work_order_id = int(link_order) if link_order not in (None,'') else None
-        machine_id = int(link_machine) if link_machine not in (None,'') else None
+        work_order_id = optional_id(link_order, 'work order')
+        machine_id = optional_id(link_machine, 'machine')
         work_order = db.get(WorkOrder, work_order_id) if work_order_id else None
         machine = db.get(CustomerMachine, machine_id) if machine_id else None
         if work_order_id and not work_order:
@@ -1117,8 +1131,16 @@ def create_work_report():
                     WorkOrderAssignment.employee_id==employee_id,
                     WorkOrder.machine_id==machine_id).limit(1)):
                 abort(403, 'You can only link work reports to machines assigned to your work.')
-        if work_order_id and machine_id and work_order.machine_id and work_order.machine_id != machine_id:
+        if work_order_id and machine_id and (machine.customer_id!=work_order.customer_id or (work_order.machine_id and work_order.machine_id!=machine_id)):
             abort(400, 'Selected machine does not match the selected work order.')
+        if work_order:
+            customer=db.get(Customer,work_order.customer_id)
+            r.customer=customer.name;r.job_no=work_order.code
+            if not r.service_type:
+                r.service_type=work_order.service_type;r.service_activities=work_order.service_activities
+            if not machine_id and work_order.machine_id:
+                machine_id=work_order.machine_id;machine=db.get(CustomerMachine,machine_id)
+        if machine:r.machine=machine.customer_machine_no or machine.model or machine.code
         if work_order_id or machine_id:
             db.add(WorkReportLink(work_report_id=r.id, work_order_id=work_order_id, machine_id=machine_id))
         e = db.get(Employee, employee_id)
@@ -1134,7 +1156,11 @@ def update_work_report(report_id):
     with DB.begin() as db:
         r = db.get(WorkReport, report_id)
         if not r: abort(404)
-        if 'status' in data: r.status = str(data['status']).strip()[:30] or r.status
+        if 'status' in data:
+            if data['status'] not in (*PLAN_STATUSES,'Pending'):abort(400,'Choose a listed work status.')
+            r.status=data['status']
+        if any(k in data for k in ('service_type','service_activities')):
+            for key,value in service_fields(data,r).items():setattr(r,key,value)
         if 'supervisor_note' in data: r.supervisor_note = str(data['supervisor_note']).strip()[:5000] or None
         if data.get('verify') is True: r.verified_by = request.employee.id
         e = db.get(Employee, r.employee_id)
@@ -1255,6 +1281,69 @@ def update_meeting_action(action_id):
         return {'id':a.id,'status':a.status}
 
 
+SERVICE_TYPES = ('Breakdown','Preventive','Inspection','Installation','Repair')
+SERVICE_ACTIVITIES = ('Cover Service','Conveyor Service','Alignment / Adjustment','Drawing Work','Repairs','Mechanical Check','Others','Replacement and Fixing work')
+WORK_STATUSES = ('Open','In Progress','On Hold','Completed','Closed','Cancelled','Rework')
+PLAN_STATUSES = ('Open','Planned','In Progress','Blocked','On Hold','Completed','Closed','Cancelled','Rework')
+TERMINAL_STATUSES = ('Completed','Closed','Cancelled')
+PROJECT_STAGES = ('Planning','Design','Drawing Work','Material preparation','Laser cutting','Bending','Welding','Assembly','Powder coating','Inspection','Service','Ready for dispatch','Dispatch','Delivered','Rework')
+
+
+def json_list(value):
+    try: result=json.loads(value or '[]')
+    except (ValueError,TypeError): return []
+    return result if isinstance(result,list) else []
+
+
+def service_fields(data, existing=None):
+    raw=data.get('service_type', getattr(existing,'service_type',None))
+    service_type=str(raw or '').strip() or None
+    if service_type=='Preventive service': service_type='Preventive'
+    if service_type and service_type not in SERVICE_TYPES: abort(400,'Choose a listed service type.')
+    activities=data.get('service_activities',json_list(getattr(existing,'service_activities',None)))
+    if not isinstance(activities,list) or len(activities)>len(SERVICE_ACTIVITIES) or any(not isinstance(a,str) or a not in SERVICE_ACTIVITIES for a in activities):
+        abort(400,'Choose activities from the service list.')
+    if activities and not service_type: abort(400,'Choose a service type for these activities.')
+    return dict(service_type=service_type,service_activities=json.dumps(list(dict.fromkeys(activities))))
+
+
+def optional_id(value,label):
+    if value in (None,''):return None
+    if isinstance(value,bool):abort(400,'Choose a valid '+label+'.')
+    try: result=int(value)
+    except (ValueError,TypeError):abort(400,'Choose a valid '+label+'.')
+    if result<=0:abort(400,'Choose a valid '+label+'.')
+    return result
+
+
+def linked_work_context(db,data):
+    order_id=optional_id(data.get('work_order_id'),'work order')
+    customer_id=optional_id(data.get('customer_id'),'customer')
+    machine_id=optional_id(data.get('machine_id'),'machine')
+    order=db.get(WorkOrder,order_id) if order_id else None
+    if order_id and not order:abort(404,'Work order not found.')
+    if order:
+        if customer_id and customer_id!=order.customer_id:abort(400,'Work order does not belong to the selected company.')
+        customer_id=order.customer_id
+        if machine_id and order.machine_id and machine_id!=order.machine_id:abort(400,'Machine does not match this work order.')
+        machine_id=machine_id or order.machine_id
+    machine=db.get(CustomerMachine,machine_id) if machine_id else None
+    if machine_id and not machine:abort(404,'Machine not found.')
+    if machine:
+        if customer_id and machine.customer_id!=customer_id:abort(400,'Machine does not belong to the selected company.')
+        customer_id=machine.customer_id
+    if customer_id and not db.get(Customer,customer_id):abort(404,'Customer not found.')
+    return customer_id,machine_id,order
+
+
+@app.get('/api/workflow-options')
+@login_required()
+def workflow_options():
+    return dict(service_types=SERVICE_TYPES,service_activities=SERVICE_ACTIVITIES,work_statuses=WORK_STATUSES,
+                plan_statuses=PLAN_STATUSES,project_stages=PROJECT_STAGES,
+                machine_types=['VMC','HMC','CNC Turning','VTL','Grinding','Other'])
+
+
 def customer_json(c):
     return dict(id=c.id, code=c.code, name=c.name, gstin=c.gstin, industry=c.industry,
                 phone=c.phone, email=c.email, address=c.address, status=c.status, notes=c.notes)
@@ -1266,7 +1355,8 @@ def machine_json(m, customer=None, machine_type=None):
                 machine_type_id=m.machine_type_id, machine_type=machine_type.name if machine_type else None,
                 customer_machine_no=m.customer_machine_no, manufacturer=m.manufacturer, model=m.model,
                 serial_no=m.serial_no, controller=m.controller, department=m.department, location=m.location,
-                installation_date=m.installation_date, status=m.status, notes=m.notes)
+                installation_date=m.installation_date, status=m.status, notes=m.notes, specifications=m.specifications,
+                last_service_date=m.last_service_date,next_service_date=m.next_service_date)
 
 
 def work_order_json(db, w):
@@ -1280,7 +1370,9 @@ def work_order_json(db, w):
     return dict(id=w.id, code=w.code, customer_id=w.customer_id, customer=customer.name if customer else None,
                 machine_id=w.machine_id, machine_code=machine.code if machine else None,
                 machine_no=machine.customer_machine_no if machine else None, title=w.title,
-                service_product=w.service_product, work_type=w.work_type,
+                service_product=w.service_product, work_type=w.work_type,service_type=w.service_type,
+                service_activities=json_list(w.service_activities),current_stage=w.current_stage,customer_remarks=w.customer_remarks,
+                machine_model=machine.model if machine else None,machine_manufacturer=machine.manufacturer if machine else None,
                 description=w.description, job_owner=emp_name(w.job_owner_id), supervisor=emp_name(w.supervisor_id),
                 approved_by=emp_name(w.approved_by_id), start_date=w.start_date, target_date=w.target_date,
                 completed_date=w.completed_date, status=w.status, priority=w.priority,
@@ -1291,10 +1383,17 @@ def work_order_json(db, w):
 def daily_plan_json(db, row):
     employee=db.get(Employee,row.employee_id)
     order=db.get(WorkOrder,row.work_order_id) if row.work_order_id else None
-    return dict(id=row.id,date=row.work_date,title=row.title,details=row.details,
+    customer_id=row.customer_id or (order.customer_id if order else None)
+    machine_id=row.machine_id or (order.machine_id if order else None)
+    customer=db.get(Customer,customer_id) if customer_id else None
+    machine=db.get(CustomerMachine,machine_id) if machine_id else None
+    return dict(id=row.id,date=row.work_date,due_date=row.due_date or row.work_date,title=row.title,details=row.details,
                 department=row.department,employee_id=row.employee_id,
                 employee=employee.name if employee else 'Former employee',
+                customer_id=customer_id,customer=customer.name if customer else None,
+                machine_id=machine_id,machine=machine.customer_machine_no or machine.model or machine.code if machine else None,
                 work_order_id=row.work_order_id,work_order=order.code if order else None,
+                service_type=row.service_type,service_activities=json_list(row.service_activities),
                 estimated_hours=float(row.estimated_hours),priority=row.priority,status=row.status)
 
 
@@ -1359,11 +1458,8 @@ def create_daily_plan():
     if priority not in ('Normal','High','Urgent'): abort(400,'Invalid priority.')
     department=str(data.get('department') or '').strip()[:40] or None
     with DB.begin() as db:
-        order_id=data.get('work_order_id') or None
-        if order_id:
-            try: order_id=int(order_id)
-            except (ValueError,TypeError): abort(400,'Choose a valid work order.')
-            if not db.get(WorkOrder,order_id): abort(404,'Work order not found.')
+        customer_id,machine_id,order=linked_work_context(db,data)
+        order_id=order.id if order else None
         employee_id=data.get('employee_id') or None
         if employee_id:
             try: employee_id=int(employee_id)
@@ -1378,7 +1474,9 @@ def create_daily_plan():
                 candidates=[e for e in candidates if load[e.id]+hours<=capacity]
                 if not candidates: abort(409,'This task exceeds the remaining daily capacity. Choose another date, adjust the limit, or assign an employee manually after review.')
             employee_id=min(candidates,key=lambda e:(load[e.id],e.name,e.id)).id
-        row=DailyPlan(work_date=date,title=title,details=str(data.get('details') or '').strip()[:5000] or None,
+        row=DailyPlan(work_date=date,title=title,customer_id=customer_id,machine_id=machine_id,
+                      due_date=valid_iso_date(data['due_date'],'deadline') if data.get('due_date') else date,
+                      **service_fields(data,order),details=str(data.get('details') or '').strip()[:5000] or None,
                       department=department,employee_id=employee_id,work_order_id=order_id,
                       estimated_hours=hours,priority=priority,status='Planned',created_at=now())
         db.add(row);db.flush()
@@ -1392,16 +1490,36 @@ def create_daily_plan():
 def update_daily_plan(plan_id):
     data=request.get_json(silent=True) or {}
     with DB.begin() as db:
-        row=db.get(DailyPlan,plan_id)
+        row=db.scalar(select(DailyPlan).where(DailyPlan.id==plan_id).with_for_update())
         if not row: abort(404,'Planned task not found.')
-        if not request.employee.admin and row.employee_id!=request.employee.id:
-            abort(403,'This task is not assigned to you.')
-        status=data.get('status')
-        if status not in ('Planned','In Progress','Completed','Blocked','Cancelled'):
-            abort(400,'Invalid task status.')
-        if not request.employee.admin and status in ('Planned','Cancelled'):
-            abort(403,'Only an administrator can reset or cancel a task.')
-        row.status=status
+        if not request.employee.admin and row.employee_id!=request.employee.id:abort(403,'This task is not assigned to you.')
+        if not request.employee.admin and (set(data)-{'status'} or data.get('status') not in ('In Progress','Completed','Blocked','Rework')):
+            abort(403,'Only an administrator can change assignments, close or cancel a plan.')
+        if 'status' in data:
+            if data['status'] not in PLAN_STATUSES:abort(400,'Choose a listed task status.')
+            row.status=data['status']
+        if request.employee.admin:
+            if 'title' in data:row.title=clean_text(data,'title',180)
+            if 'details' in data:row.details=str(data['details'] or '').strip()[:5000] or None
+            if 'department' in data:row.department=str(data['department'] or '').strip()[:40] or None
+            if 'date' in data:row.work_date=valid_iso_date(data['date'],'work date')
+            if 'due_date' in data:row.due_date=valid_iso_date(data['due_date'],'deadline') if data['due_date'] else row.work_date
+            if 'estimated_hours' in data:row.estimated_hours=planning_limit(data['estimated_hours'],'task duration')
+            if 'priority' in data:
+                if data['priority'] not in ('Normal','High','Urgent'):abort(400,'Choose a valid priority.')
+                row.priority=data['priority']
+            if any(k in data for k in ('customer_id','machine_id','work_order_id')):
+                context={k:data.get(k,getattr(row,k)) for k in ('customer_id','machine_id','work_order_id')}
+                customer_id,machine_id,order=linked_work_context(db,context)
+                row.customer_id=customer_id;row.machine_id=machine_id;row.work_order_id=order.id if order else None
+            if 'employee_id' in data:
+                eid=optional_id(data['employee_id'],'employee')
+                employee=db.get(Employee,eid) if eid else None
+                if not employee or not employee.active or employee.admin:abort(400,'Choose an active employee when editing a plan.')
+                row.employee_id=eid
+            if any(k in data for k in ('service_type','service_activities')):
+                for key,value in service_fields(data,row).items():setattr(row,key,value)
+        db.add(AuditLog(admin_id=request.employee.id if request.employee.admin else None,action='update_daily_plan',target=str(row.id),detail=row.status,created_at=now()))
         return daily_plan_json(db,row)
 
 
@@ -1533,8 +1651,8 @@ def customer_detail(customer_id):
                 item.update(machine_id=link.machine_id,work_order_id=link.work_order_id)
                 reports.append(item)
         reports.sort(key=lambda r:(r['date'],r['id']),reverse=True)
-        serviced_ids={j['machine_id'] for j in jobs if j['machine_id'] and j['work_type'].lower()=='service' and j['status'] in ('Completed','Closed')}
-        serviced_ids.update(r['machine_id'] for r in reports if r['machine_id'])
+        serviced_ids={j['machine_id'] for j in jobs if j['machine_id'] and (j['service_type'] or j['work_type'].lower() in ('service','repair','installation','inspection','preventive maintenance')) and j['status'] in ('Completed','Closed')}
+        serviced_ids.update(r['machine_id'] for r in reports if r['machine_id'] and r['status'] in ('Completed','Closed'))
         result=customer_json(c)
         result.update(
             contacts=[dict(id=x.id,name=x.name,designation=x.designation,department=x.department,phone=x.phone,
@@ -1649,6 +1767,9 @@ def create_machine():
              department=str(data.get('department','')).strip()[:100] or None,
              location=str(data.get('location','')).strip()[:140] or None,
              installation_date=install or None,status='Active',
+             specifications=str(data.get('specifications') or '').strip()[:5000] or None,
+             last_service_date=valid_iso_date(data['last_service_date'],'last service date') if data.get('last_service_date') else None,
+             next_service_date=valid_iso_date(data['next_service_date'],'next service date') if data.get('next_service_date') else None,
              notes=str(data.get('notes','')).strip()[:5000] or None,created_at=now())
         db.add(m);db.flush();m.code=f'MCH-{m.id:06d}'
         db.add(AuditLog(admin_id=request.employee.id,action='create_machine',target=m.code,
@@ -1704,7 +1825,7 @@ def create_work_order():
     title=clean_text(data,'title',180)
     with DB.begin() as db:
         if not db.get(Customer,customer_id): abort(404,'Customer not found.')
-        machine_id=int(data['machine_id']) if data.get('machine_id') else None
+        machine_id=optional_id(data.get('machine_id'),'machine')
         if machine_id:
             machine=db.get(CustomerMachine,machine_id)
             if not machine or machine.customer_id!=customer_id: abort(400,'Machine does not belong to this customer.')
@@ -1716,7 +1837,11 @@ def create_work_order():
             return value
         start=valid_iso_date(data['start_date'],'start date') if data.get('start_date') else None
         target=valid_iso_date(data['target_date'],'target date') if data.get('target_date') else None
-        w=WorkOrder(customer_id=customer_id,machine_id=machine_id,title=title,
+        if data.get('status','Open') not in WORK_STATUSES:abort(400,'Choose a listed work order status.')
+        stage=str(data.get('current_stage') or '').strip() or None
+        if stage and stage not in PROJECT_STAGES:abort(400,'Choose a listed project stage.')
+        w=WorkOrder(customer_id=customer_id,machine_id=machine_id,title=title,**service_fields(data),
+                    current_stage=stage,customer_remarks=str(data.get('customer_remarks') or '').strip()[:3000] or None,
                     service_product=str(data.get('service_product') or '').strip()[:180] or None,
                     work_type=str(data.get('work_type','Service')).strip()[:60] or 'Service',
                     description=str(data.get('description','')).strip()[:8000] or None,
@@ -1760,13 +1885,32 @@ def assign_work_order(work_order_id):
 def update_work_order(work_order_id):
     data=request.get_json() or {}
     with DB.begin() as db:
-        w=db.get(WorkOrder,work_order_id)
+        w=db.scalar(select(WorkOrder).where(WorkOrder.id==work_order_id).with_for_update())
         if not w:abort(404,'Work order not found.')
-        if 'status' in data:w.status=str(data['status']).strip()[:30] or w.status
-        if 'completed_date' in data:
-            w.completed_date=valid_iso_date(data['completed_date'],'completed date') if data['completed_date'] else None
-        db.add(AuditLog(admin_id=request.employee.id,action='update_work_order',target=w.code or str(w.id),
-                        detail=w.status,created_at=now()))
+        if 'status' in data:
+            if data['status'] not in WORK_STATUSES:abort(400,'Choose a listed work order status.')
+            w.status=data['status']
+            if w.status in ('Completed','Closed'):w.completed_date=w.completed_date or now().astimezone(LOCAL).date().isoformat()
+            else:w.completed_date=None
+        for key in ('start_date','target_date'):
+            if key in data:setattr(w,key,valid_iso_date(data[key],key.replace('_',' ')) if data[key] else None)
+        if 'completed_date' in data and w.status in ('Completed','Closed'):
+            w.completed_date=valid_iso_date(data['completed_date'],'completed date') if data['completed_date'] else w.completed_date
+        if 'current_stage' in data:
+            if data['current_stage'] and data['current_stage'] not in PROJECT_STAGES:abort(400,'Choose a listed project stage.')
+            w.current_stage=data['current_stage'] or None
+        for key,limit in [('title',180),('description',8000),('service_product',180),('customer_remarks',3000)]:
+            if key in data:setattr(w,key,clean_text(data,key,limit) if key=='title' else str(data[key] or '').strip()[:limit] or None)
+        if 'work_type' in data:
+            if data['work_type'] not in ('Service','Manufacturing','Repair','Installation','Inspection','Preventive Maintenance'):abort(400,'Choose a listed work type.')
+            w.work_type=data['work_type']
+        if 'machine_id' in data:
+            mid=optional_id(data['machine_id'],'machine');m=db.get(CustomerMachine,mid) if mid else None
+            if mid and (not m or m.customer_id!=w.customer_id):abort(400,'Machine does not belong to this customer.')
+            w.machine_id=mid
+        if any(k in data for k in ('service_type','service_activities')):
+            for key,value in service_fields(data,w).items():setattr(w,key,value)
+        db.add(AuditLog(admin_id=request.employee.id,action='update_work_order',target=w.code or str(w.id),detail=w.status,created_at=now()))
         return work_order_json(db,w)
 
 
@@ -1974,27 +2118,25 @@ def create_supplier():
 @login_required(admin=True)
 def list_purchase_orders():
     with DB() as db:
-        return jsonify([dict(id=p.id,supplier=db.get(Supplier,p.supplier_id).name,item=db.get(StockItem,p.item_id).name,
-                             supplier_id=p.supplier_id,item_id=p.item_id,ordered_qty=str(p.ordered_qty),
-                             received_qty=str(p.received_qty),unit_price=str(p.unit_price),status=p.status,
-                             expected_date=p.expected_date)
-                        for p in db.scalars(select(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(300))])
+        return jsonify([purchase_json(db,p) for p in db.scalars(select(PurchaseOrder).order_by(PurchaseOrder.id.desc()).limit(300))])
 
 
 @app.post('/api/purchase-orders')
 @login_required(admin=True)
 def create_purchase_order():
     data=request.get_json(silent=True) or {}
-    try: supplier_id=int(data.get('supplier_id'));item_id=int(data.get('item_id'))
-    except (TypeError,ValueError): abort(400,'Select a supplier and item.')
+    supplier_id=optional_id(data.get('supplier_id'),'supplier');item_id=optional_id(data.get('item_id'),'stock item')
+    price=quantity(data.get('unit_price',0))
+    if price<0:abort(400,'Unit price cannot be negative.')
     with DB.begin() as db:
-        if not db.get(Supplier,supplier_id) or not db.get(StockItem,item_id): abort(404,'Supplier or item not found.')
+        if not supplier_id or not item_id or not db.get(Supplier,supplier_id) or not db.get(StockItem,item_id):abort(404,'Supplier or item not found.')
         p=PurchaseOrder(supplier_id=supplier_id,item_id=item_id,ordered_qty=quantity(data.get('ordered_qty'),True),
-                        received_qty=Decimal(0),unit_price=quantity(data.get('unit_price',0)),
-                        expected_date=str(data.get('expected_date') or '')[:10] or None,
+                        received_qty=Decimal(0),unit_price=price,
+                        expected_date=valid_iso_date(data['expected_date'],'expected delivery') if data.get('expected_date') else None,
+                        supplier_reference=str(data.get('supplier_reference') or '').strip()[:100] or None,
+                        notes=str(data.get('notes') or '').strip()[:3000] or None,
                         status='Open',created_by=request.employee.id,created_at=now())
-        db.add(p);db.flush()
-        return dict(id=p.id,status=p.status),201
+        db.add(p);db.flush();return purchase_json(db,p),201
 
 
 @app.post('/api/purchase-orders/<int:order_id>/receive')
@@ -2005,7 +2147,8 @@ def receive_purchase_order(order_id):
     with DB.begin() as db:
         p=db.scalar(select(PurchaseOrder).where(PurchaseOrder.id==order_id).with_for_update())
         if not p: abort(404,'Purchase order not found.')
-        if p.status=='Cancelled' or p.received_qty+amount>p.ordered_qty: abort(409,'Receipt exceeds outstanding quantity.')
+        if p.status in ('Cancelled','Closed','Received'):abort(409,'Reopen this purchase order before recording another receipt.')
+        if p.received_qty+amount>p.ordered_qty:abort(409,'Receipt exceeds outstanding quantity.')
         item=db.scalar(select(StockItem).where(StockItem.id==p.item_id).with_for_update())
         p.received_qty+=amount
         p.status='Received' if p.received_qty==p.ordered_qty else 'Part received'
@@ -2179,7 +2322,7 @@ def employee_monthly_profile(employee_id):
         plans=db.scalars(select(DailyPlan).where(DailyPlan.employee_id==employee_id,
                           DailyPlan.work_date>=start,DailyPlan.work_date<end).order_by(DailyPlan.work_date.desc())).all()
         due_plans=[p for p in plans if p.work_date<=today and p.status!='Cancelled']
-        done_plans=[p for p in due_plans if p.status=='Completed']
+        done_plans=[p for p in due_plans if p.status in ('Completed','Closed')]
         reports=db.scalars(select(WorkReport).where(WorkReport.employee_id==employee_id,
                            WorkReport.work_date>=start,WorkReport.work_date<end)
                            .order_by(WorkReport.work_date.desc(),WorkReport.id.desc())).all()
@@ -2264,7 +2407,7 @@ def create_production_step():
     with DB.begin() as db:
         if not db.get(WorkOrder,job_id): abort(404,'Work order not found.')
         s=ProductionStep(work_order_id=job_id,sequence=seq,operation=clean_text(data,'operation',80),
-                         planned_date=str(data.get('planned_date') or '')[:10] or None,
+                         planned_date=valid_iso_date(data['planned_date'],'planned date') if data.get('planned_date') else None,
                          planned_hours=quantity(data.get('planned_hours',0)),actual_hours=Decimal(0),
                          accepted_qty=Decimal(0),rejected_qty=Decimal(0),status='Planned')
         db.add(s);db.flush();return step_json(s),201
@@ -2278,7 +2421,7 @@ def update_production_step(step_id):
         s=db.get(ProductionStep,step_id)
         if not s: abort(404,'Production step not found.')
         if 'status' in data:
-            if data['status'] not in ('Planned','In Progress','Blocked','Completed'): abort(400,'Invalid status.')
+            if data['status'] not in PLAN_STATUSES: abort(400,'Invalid status.')
             s.status=data['status']
         for key in ('actual_hours','accepted_qty','rejected_qty'):
             if key in data: setattr(s,key,quantity(data[key]))
@@ -2304,13 +2447,13 @@ def list_company_assets():
 @login_required(admin=True)
 def create_company_asset():
     data=request.get_json(silent=True) or {}
-    if data.get('kind') not in ('Machine','Bike'): abort(400,'Choose Machine or Bike.')
+    if data.get('kind') not in ('Machine','Bike','Vehicle','Tool','Equipment'): abort(400,'Choose Machine, Bike, Vehicle, Tool or Equipment.')
     with DB.begin() as db:
         a=CompanyAsset(code=clean_text(data,'code',60).upper(),kind=data['kind'],name=clean_text(data,'name',160),
                        model=str(data.get('model') or '')[:120] or None,
                        serial_or_registration=str(data.get('serial_or_registration') or '')[:100] or None,
                        location=str(data.get('location') or '')[:100] or None,
-                       next_service_date=str(data.get('next_service_date') or '')[:10] or None,active=True)
+                       next_service_date=valid_iso_date(data['next_service_date'],'next service date') if data.get('next_service_date') else None,active=True)
         db.add(a);db.flush();return asset_json(a),201
 
 
@@ -2322,7 +2465,7 @@ def update_company_asset(asset_id):
         a=db.get(CompanyAsset,asset_id)
         if not a: abort(404,'Asset not found.')
         if 'kind' in data:
-            if data['kind'] not in ('Machine','Bike'): abort(400,'Choose Machine or Bike.')
+            if data['kind'] not in ('Machine','Bike','Vehicle','Tool','Equipment'): abort(400,'Choose Machine, Bike, Vehicle, Tool or Equipment.')
             a.kind=data['kind']
         for key,limit in {'code':60,'name':160,'model':120,'serial_or_registration':100,'location':100}.items():
             if key in data:
@@ -2344,25 +2487,20 @@ def update_company_asset(asset_id):
 @login_required(admin=True)
 def list_maintenance_tasks():
     with DB() as db:
-        return jsonify([dict(id=t.id,asset_id=t.asset_id,asset=db.get(CompanyAsset,t.asset_id).name,
-                             task_type=t.task_type,description=t.description,due_date=t.due_date,
-                             completed_date=t.completed_date,status=t.status,downtime_hours=str(t.downtime_hours),
-                             cost=str(t.cost),notes=t.notes)
-                        for t in db.scalars(select(MaintenanceTask).order_by(MaintenanceTask.id.desc()).limit(300))])
+        return jsonify([maintenance_json(db,t) for t in db.scalars(select(MaintenanceTask).order_by(MaintenanceTask.id.desc()).limit(300))])
 
 
 @app.post('/api/maintenance-tasks')
 @login_required(admin=True)
 def create_maintenance_task():
     data=request.get_json(silent=True) or {}
-    try: asset_id=int(data.get('asset_id'))
-    except (TypeError,ValueError): abort(400,'Select an asset.')
     with DB.begin() as db:
-        if not db.get(CompanyAsset,asset_id): abort(404,'Asset not found.')
-        t=MaintenanceTask(asset_id=asset_id,task_type=clean_text(data,'task_type',30),
-                          description=clean_text(data,'description',5000),due_date=str(data.get('due_date') or '')[:10] or None,
-                          status='Open',downtime_hours=Decimal(0),cost=Decimal(0),created_at=now())
-        db.add(t);db.flush();return {'id':t.id,'status':t.status},201
+        if not data.get('asset_id') or not data.get('task_type') or not data.get('description'):abort(400,'Select an asset, service type and description.')
+        t=MaintenanceTask(task_type='Inspection',description='',status='Open',downtime_hours=Decimal(0),cost=Decimal(0),created_at=now())
+        apply_maintenance_fields(db,t,data)
+        db.add(t);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='create_maintenance_task',target=str(t.id),detail=t.task_type,created_at=now()))
+        return maintenance_json(db,t),201
 
 
 @app.patch('/api/maintenance-tasks/<int:task_id>')
@@ -2370,32 +2508,11 @@ def create_maintenance_task():
 def update_maintenance_task(task_id):
     data=request.get_json(silent=True) or {}
     with DB.begin() as db:
-        t=db.get(MaintenanceTask,task_id)
-        if not t: abort(404,'Task not found.')
-        if 'asset_id' in data:
-            try: asset_id=int(data['asset_id'])
-            except (TypeError,ValueError): abort(400,'Select an asset.')
-            if not db.get(CompanyAsset,asset_id): abort(404,'Asset not found.')
-            t.asset_id=asset_id
-        for key,limit in {'task_type':30,'description':5000}.items():
-            if key in data: setattr(t,key,clean_text(data,key,limit))
-        if 'due_date' in data:
-            t.due_date=valid_iso_date(data['due_date'],'due date') if data['due_date'] else None
-        if 'status' in data:
-            if data['status'] not in ('Open','In Progress','Completed'): abort(400,'Invalid status.')
-            t.status=data['status']
-            if t.status=='Completed': t.completed_date=t.completed_date or now().astimezone(LOCAL).date().isoformat()
-            else: t.completed_date=None
-        if 'completed_date' in data:
-            if t.status=='Completed':
-                t.completed_date=valid_iso_date(data['completed_date'],'completion date') if data['completed_date'] else t.completed_date
-            else: t.completed_date=None
-        for key in ('cost','downtime_hours'):
-            if key in data: setattr(t,key,quantity(data[key]))
-        if 'notes' in data: t.notes=str(data['notes'] or '')[:5000] or None
-        db.add(AuditLog(admin_id=request.employee.id,action='update_maintenance_task',target=str(t.id),
-                        detail=json.dumps(data)[:1000],created_at=now()))
-        return {'id':t.id,'status':t.status}
+        t=db.scalar(select(MaintenanceTask).where(MaintenanceTask.id==task_id).with_for_update())
+        if not t:abort(404,'Task not found.')
+        apply_maintenance_fields(db,t,data)
+        db.add(AuditLog(admin_id=request.employee.id,action='update_maintenance_task',target=str(t.id),detail=json.dumps(data)[:1000],created_at=now()))
+        return maintenance_json(db,t)
 
 
 @app.get('/api/storage-summary')
@@ -2434,18 +2551,27 @@ def deadline_reminders():
                              urgency='Overdue' if remaining<0 else 'Due today' if remaining==0 else 'Due tomorrow' if remaining==1 else 'Next 7 days' if remaining<=7 else 'Upcoming',
                              notes=r.notes if kind=='Custom' else None))
         for r in db.scalars(select(WorkOrder).where(WorkOrder.status.notin_(['Completed','Closed','Cancelled']))):add('Work order',r,r.target_date,r.code+' · '+r.title,'jobs')
-        for r in db.scalars(select(DailyPlan).where(DailyPlan.status.notin_(['Completed','Cancelled']))):add('Planned task',r,r.work_date,r.title,'planning')
-        for r in db.scalars(select(ProductionStep).where(ProductionStep.status.notin_(['Completed','Cancelled']))):add('Production',r,r.planned_date,f'Order #{r.work_order_id} · '+r.operation,'production')
-        for r in db.scalars(select(MaintenanceTask).where(MaintenanceTask.status.notin_(['Completed','Cancelled']))):add('Maintenance',r,r.due_date,r.description,'maintenance')
+        for r in db.scalars(select(DailyPlan).where(DailyPlan.status.notin_(TERMINAL_STATUSES))):add('Planned task',r,r.due_date or r.work_date,r.title,'planning')
+        for r in db.scalars(select(ProductionStep).where(ProductionStep.status.notin_(TERMINAL_STATUSES))):add('Production',r,r.planned_date,f'Order #{r.work_order_id} · '+r.operation,'production')
+        for r in db.scalars(select(MaintenanceTask).where(MaintenanceTask.status.notin_(TERMINAL_STATUSES))):add('Maintenance',r,r.due_date,r.description,'maintenance')
         for r in db.scalars(select(CompanyAsset).where(CompanyAsset.active==True)):add('Asset service',r,r.next_service_date,r.code+' · '+r.name,'maintenance')
-        for r in db.scalars(select(PurchaseOrder).where(PurchaseOrder.status.notin_(['Received','Cancelled']))):add('Purchase delivery',r,r.expected_date,f'Purchase order #{r.id}','purchasing')
+        for r in db.scalars(select(PurchaseOrder).where(PurchaseOrder.status.notin_(['Received','Closed','Cancelled']))):add('Purchase delivery',r,r.expected_date,f'Purchase order #{r.id}','purchasing')
         for r in db.scalars(select(Quotation).where(Quotation.status.notin_(['Accepted','Lost','Cancelled']))):
             add('Quotation follow-up',r,r.follow_up_date,r.code+' · '+r.title,'quotations')
             add('Quotation promised date',r,r.promised_date,r.code+' · '+r.title,'quotations')
         for r in db.scalars(select(MeetingAction).where(MeetingAction.status.notin_(['Completed','Closed','Cancelled','Done']))):add('Meeting action',r,r.due_date,r.action,'meetings')
         for r in db.scalars(select(DeadlineReminder).where(DeadlineReminder.completed==False)):add('Custom',r,r.due_date,r.title,'reminders')
-        rows.sort(key=lambda r:(r['due_date'],r['kind'],r['id']))
-        return dict(today=today.isoformat(),timezone=str(LOCAL),items=rows,overdue=sum(r['days']<0 for r in rows),due_today=sum(r['days']==0 for r in rows),next_week=sum(0<r['days']<=7 for r in rows))
+        for r in db.scalars(select(CustomerMachine).where(CustomerMachine.status!='Out of service')):
+            company=db.get(Customer,r.customer_id)
+            add('Machine service',r,r.next_service_date,f'{company.name} · {r.customer_machine_no or r.model or r.code}','machines')
+        for item in db.scalars(select(StockItem).where(StockItem.active==True)):
+            available=item.quantity-reserved_total(db,item.id)
+            if available<=item.reorder_level:
+                rows.append(dict(key=f'Low stock:{item.id}',id=item.id,kind='Low stock',title=item.sku+' · '+item.name,
+                                 due_date=None,days=None,view='inventory',urgency='Low stock',
+                                 notes=f'{available} {item.unit} available after reservations; reorder threshold {item.reorder_level} {item.unit}.'))
+        rows.sort(key=lambda r:(r['due_date'] or today.isoformat(),r['kind'],r['id']))
+        return dict(today=today.isoformat(),timezone=str(LOCAL),items=rows,overdue=sum(r['days'] is not None and r['days']<0 for r in rows),due_today=sum(r['days']==0 for r in rows),next_week=sum(r['days'] is not None and 0<r['days']<=7 for r in rows),low_stock=sum(r['kind']=='Low stock' for r in rows))
 
 
 @app.patch('/api/deadline-reminders/<int:reminder_id>')
@@ -2477,8 +2603,8 @@ def management_summary():
                     blocked_steps=sum(s.status=='Blocked' for s in steps),
                     accepted_quantity=str(sum((s.accepted_qty for s in steps),Decimal(0))),
                     rejected_quantity=str(sum((s.rejected_qty for s in steps),Decimal(0))),
-                    low_stock=sum(i.quantity<=i.reorder_level for i in items),
-                    open_maintenance=sum(t.status!='Completed' for t in tasks))
+                    low_stock=sum(i.quantity-reserved_total(db,i.id)<=i.reorder_level for i in items),
+                    open_maintenance=sum(t.status not in TERMINAL_STATUSES for t in tasks))
 
 
 def quote_json(db,q):
@@ -2793,3 +2919,327 @@ def create_dispatch(job_id):
         db.add(AuditLog(admin_id=request.employee.id,action='dispatch_job',target=w.code or str(job_id),
                         detail=f'{amount} on {date}',created_at=now()))
         return {'id':x.id,'quantity':str(amount)},201
+
+
+
+def deletion_summary(kind, record, groups, notes):
+    label=getattr(record,'code',None) or f'PLAN-{record.id}'
+    payload=dict(kind=kind,id=record.id,label=label,groups=groups)
+    token=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+    return dict(name=getattr(record,'name',None) or getattr(record,'title',label),
+                confirmation='DELETE '+label,preview_token=token,
+                counts={name:len(ids) for name,ids in groups.items()},notes=notes)
+
+
+def require_deletion_confirmation(preview):
+    data=request.get_json(silent=True) or {}
+    if data.get('confirmation')!=preview['confirmation']:abort(400,'Type the exact deletion phrase shown in the preview.')
+    if data.get('preview_token')!=preview['preview_token']:abort(409,'Linked records changed. Open the deletion preview again.')
+
+
+def customer_deletion_scope(db,c):
+    ids=lambda model,condition:list(db.scalars(select(model.id).where(condition).order_by(model.id)))
+    machines=ids(CustomerMachine,CustomerMachine.customer_id==c.id)
+    jobs=ids(WorkOrder,or_(WorkOrder.customer_id==c.id,WorkOrder.machine_id.in_(machines)))
+    reports=list(db.scalars(select(WorkReportLink.work_report_id).where(or_(WorkReportLink.work_order_id.in_(jobs),WorkReportLink.machine_id.in_(machines))).order_by(WorkReportLink.work_report_id)))
+    groups={'Customer profiles':[c.id],'Contacts':ids(CustomerContact,CustomerContact.customer_id==c.id),
+            'Sites':ids(CustomerSite,CustomerSite.customer_id==c.id),'Machines':machines,'Work orders':jobs,
+            'Plans':ids(DailyPlan,or_(DailyPlan.customer_id==c.id,DailyPlan.work_order_id.in_(jobs),DailyPlan.machine_id.in_(machines))),
+            'Linked work reports':reports,'Quotations':ids(Quotation,Quotation.customer_id==c.id),
+            'Project documents':ids(PrivateDocument,(PrivateDocument.owner_type=='job') & PrivateDocument.owner_id.in_(jobs)),
+            'Customer documents':ids(PrivateDocument,(PrivateDocument.owner_type=='customer') & (PrivateDocument.owner_id==c.id))}
+    for label,model in [('Assignments',WorkOrderAssignment),('Production operations',ProductionStep),('Material requirements',MaterialRequirement),('Drawing revisions',DrawingRevision),('Quality inspections',QualityCheck),('Dispatch records',DispatchRecord),('Customer updates',CustomerUpdate)]:
+        groups[label]=ids(model,model.work_order_id.in_(jobs))
+    return groups
+
+
+@app.get('/api/customers/<int:customer_id>/delete-preview')
+@login_required(admin=True)
+def preview_customer_deletion(customer_id):
+    with DB() as db:
+        c=db.get(Customer,customer_id)
+        if not c:abort(404,'Customer not found.')
+        return deletion_summary('customer',c,customer_deletion_scope(db,c),
+            'Permanently deletes this company and the linked records listed below, including linked service reports. Stock movement history and stock balances are retained; material reservations are released. This cannot be undone in the portal.')
+
+
+@app.delete('/api/customers/<int:customer_id>')
+@login_required(admin=True)
+def delete_customer(customer_id):
+    with DB.begin() as db:
+        c=db.scalar(select(Customer).where(Customer.id==customer_id).with_for_update())
+        if not c:abort(404,'Customer not found.')
+        groups=customer_deletion_scope(db,c)
+        require_deletion_confirmation(deletion_summary('customer',c,groups,''))
+        jobs=groups['Work orders']; reports=groups['Linked work reports']
+        # Issued stock remains issued; only the removed work-order reference is cleared.
+        db.execute(update(StockMovement).where(StockMovement.work_order_id.in_(jobs)).values(work_order_id=None))
+        db.execute(update(Quotation).where(Quotation.work_order_id.in_(jobs)).values(work_order_id=None))
+        db.execute(delete(WorkReportLink).where(WorkReportLink.work_report_id.in_(reports)))
+        for label,model in [('Project documents',PrivateDocument),('Customer documents',PrivateDocument),('Customer updates',CustomerUpdate),('Assignments',WorkOrderAssignment),('Production operations',ProductionStep),('Material requirements',MaterialRequirement),('Drawing revisions',DrawingRevision),('Quality inspections',QualityCheck),('Dispatch records',DispatchRecord),('Plans',DailyPlan),('Linked work reports',WorkReport),('Quotations',Quotation),('Work orders',WorkOrder),('Machines',CustomerMachine),('Contacts',CustomerContact),('Sites',CustomerSite)]:
+            db.execute(delete(model).where(model.id.in_(groups[label])))
+        db.add(AuditLog(admin_id=request.employee.id,action='delete_customer',target=str(c.id),detail=json.dumps({k:len(v) for k,v in groups.items()}),created_at=now()))
+        db.delete(c)
+    return dict(ok=True)
+
+
+def employee_deletion_scope(db,e):
+    ids=lambda model,condition:list(db.scalars(select(model.id).where(condition).order_by(model.id)))
+    groups={'Employee profiles':[e.id],'Attendance records':ids(Attendance,Attendance.employee_id==e.id),
+            'Personal documents':ids(PrivateDocument,(PrivateDocument.owner_type=='employee') & (PrivateDocument.owner_id==e.id))}
+    for label,model in [('Employee files',EmployeeProfile),('Points entries',EmployeePoint),('Policy memos',EmployeeMemo),('Plans',DailyPlan),('Work reports',WorkReport),('Reported issues',WorkIssue),('Meeting actions',MeetingAction),('Work assignments',WorkOrderAssignment),('Biometric credentials',WebAuthnCredential)]:
+        groups[label]=ids(model,model.employee_id==e.id)
+    return groups
+
+
+@app.get('/api/employees/<int:employee_id>/delete-preview')
+@login_required(admin=True)
+def preview_employee_deletion(employee_id):
+    with DB() as db:
+        e=db.get(Employee,employee_id)
+        if not e or e.admin:abort(404,'Employee not found or administrator account protected.')
+        return deletion_summary('employee',e,employee_deletion_scope(db,e),
+            'Permanently deletes this employee, their login, attendance, personal documents, points, memos and records listed below. Company work orders, purchases, maintenance and stock history remain; employee references are cleared. This cannot be undone in the portal.')
+
+
+def permanently_delete_employee(employee_id):
+    photos=[]
+    with DB.begin() as db:
+        e=db.scalar(select(Employee).where(Employee.id==employee_id).with_for_update())
+        if not e or e.admin:abort(404,'Employee not found or administrator account protected.')
+        groups=employee_deletion_scope(db,e)
+        require_deletion_confirmation(deletion_summary('employee',e,groups,''))
+        photos=[p for r in db.scalars(select(Attendance).where(Attendance.employee_id==e.id)) for p in (r.in_photo,r.out_photo) if p]
+        if e.photo_id:photos.append(e.photo_id)
+        db.execute(delete(WorkReportLink).where(WorkReportLink.work_report_id.in_(groups['Work reports'])))
+        for model,field in [(WorkOrder,'job_owner_id'),(WorkOrder,'supervisor_id'),(WorkOrder,'approved_by_id'),(ProductionStep,'assigned_id'),(MaintenanceTask,'assigned_id'),(WorkReport,'verified_by'),(EmployeeProfile,'supervisor_id'),(WorkIssue,'assigned_to'),(DrawingRevision,'approved_by'),(Meeting,'created_by'),(StockMovement,'actor_id'),(PurchaseOrder,'created_by'),(PrivateDocument,'uploaded_by'),(QualityCheck,'inspector_id'),(DispatchRecord,'created_by'),(CustomerUpdate,'created_by'),(AuditLog,'admin_id')]:
+            db.execute(update(model).where(getattr(model,field)==e.id).values({field:None}))
+        for label,model in [('Personal documents',PrivateDocument),('Employee files',EmployeeProfile),('Points entries',EmployeePoint),('Policy memos',EmployeeMemo),('Plans',DailyPlan),('Work reports',WorkReport),('Reported issues',WorkIssue),('Meeting actions',MeetingAction),('Work assignments',WorkOrderAssignment),('Biometric credentials',WebAuthnCredential),('Attendance records',Attendance)]:
+            db.execute(delete(model).where(model.id.in_(groups[label])))
+        db.add(AuditLog(admin_id=request.employee.id,action='delete_employee',target=str(e.id),detail=json.dumps({k:len(v) for k,v in groups.items()}),created_at=now()))
+        db.delete(e)
+    for photo in set(photos):remove_photo(photo)
+    return dict(ok=True)
+
+
+@app.get('/api/daily-plans/<int:plan_id>/delete-preview')
+@login_required(admin=True)
+def preview_plan_deletion(plan_id):
+    with DB() as db:
+        row=db.get(DailyPlan,plan_id)
+        if not row:abort(404,'Plan not found.')
+        return deletion_summary('plan',row,{'Plans':[row.id]},'Permanently removes this planning record and frees its booked hours. The linked customer, machine and work order remain.')
+
+
+@app.delete('/api/daily-plans/<int:plan_id>')
+@login_required(admin=True)
+def delete_daily_plan(plan_id):
+    with DB.begin() as db:
+        row=db.scalar(select(DailyPlan).where(DailyPlan.id==plan_id).with_for_update())
+        if not row:abort(404,'Plan not found.')
+        require_deletion_confirmation(deletion_summary('plan',row,{'Plans':[row.id]},''))
+        db.add(AuditLog(admin_id=request.employee.id,action='delete_daily_plan',target=str(row.id),detail=None,created_at=now()))
+        db.delete(row)
+    return dict(ok=True)
+
+
+
+@app.patch('/api/machines/<int:machine_id>')
+@login_required(admin=True)
+def edit_customer_machine(machine_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        m=db.get(CustomerMachine,machine_id)
+        if not m:abort(404,'Machine not found.')
+        if 'customer_id' in data and optional_id(data['customer_id'],'customer')!=m.customer_id:abort(400,'A machine with service history must stay with its company.')
+        for key,limit in [('customer_machine_no',80),('manufacturer',120),('model',120),('serial_no',120),('controller',120),('department',100),('location',140),('notes',5000),('specifications',5000)]:
+            if key in data:setattr(m,key,str(data[key] or '').strip()[:limit] or None)
+        for key in ('installation_date','last_service_date','next_service_date'):
+            if key in data:setattr(m,key,valid_iso_date(data[key],key.replace('_',' ')) if data[key] else None)
+        if 'machine_type' in data:
+            name=str(data['machine_type'] or '').strip()[:120]
+            mt=db.scalar(select(MachineType).where(MachineType.name==name)) if name else None
+            if name and not mt:mt=MachineType(name=name);db.add(mt);db.flush()
+            m.machine_type_id=mt.id if mt else None
+        if 'status' in data:
+            if data['status'] not in ('Active','Under maintenance','Out of service'):abort(400,'Choose a listed machine status.')
+            m.status=data['status']
+        db.add(AuditLog(admin_id=request.employee.id,action='update_customer_machine',target=m.code,detail=None,created_at=now()))
+        return machine_json(m,db.get(Customer,m.customer_id),db.get(MachineType,m.machine_type_id) if m.machine_type_id else None)
+
+
+def purchase_json(db,p):
+    supplier=db.get(Supplier,p.supplier_id);item=db.get(StockItem,p.item_id)
+    return dict(id=p.id,supplier=supplier.name,item=item.name,unit=item.unit,supplier_id=p.supplier_id,item_id=p.item_id,
+                ordered_qty=str(p.ordered_qty),received_qty=str(p.received_qty),unit_price=str(p.unit_price),
+                outstanding_qty=str(max(Decimal(0),p.ordered_qty-p.received_qty)),status=p.status,
+                expected_date=p.expected_date,supplier_reference=p.supplier_reference,notes=p.notes,
+                order_value=str(p.ordered_qty*p.unit_price))
+
+
+@app.patch('/api/purchase-orders/<int:order_id>')
+@login_required(admin=True)
+def edit_purchase_order(order_id):
+    data=request.get_json(silent=True) or {}
+    with DB.begin() as db:
+        p=db.scalar(select(PurchaseOrder).where(PurchaseOrder.id==order_id).with_for_update())
+        if not p:abort(404,'Purchase order not found.')
+        for key,model in [('supplier_id',Supplier),('item_id',StockItem)]:
+            if key in data:
+                value=optional_id(data[key],key.replace('_',' '))
+                if not value or not db.get(model,value):abort(404,'Supplier or item not found.')
+                if p.received_qty>0 and value!=getattr(p,key):abort(409,'Supplier and item are locked after the first receipt.')
+                setattr(p,key,value)
+        if 'ordered_qty' in data:
+            value=quantity(data['ordered_qty'],True)
+            if value<p.received_qty:abort(409,'Ordered quantity cannot be below the quantity already received.')
+            p.ordered_qty=value
+        if 'unit_price' in data:
+            value=quantity(data['unit_price'])
+            if value<0:abort(400,'Unit price cannot be negative.')
+            if p.received_qty>0 and value!=p.unit_price:abort(409,'Unit price is locked after the first receipt.')
+            p.unit_price=value
+        if 'expected_date' in data:p.expected_date=valid_iso_date(data['expected_date'],'expected delivery') if data['expected_date'] else None
+        for key,limit in [('supplier_reference',100),('notes',3000)]:
+            if key in data:setattr(p,key,str(data[key] or '').strip()[:limit] or None)
+        if 'status' in data:
+            if data['status'] not in ('Open','Ordered','Closed','Cancelled'):abort(400,'Use Receive to record delivered quantities.')
+            if data['status'] in ('Closed','Cancelled') and not str(data.get('reason') or '').strip():abort(400,'Enter a reason for closing or cancelling the remaining order.')
+            p.status=data['status']
+        if p.status not in ('Closed','Cancelled'):
+            if p.received_qty==p.ordered_qty:p.status='Received'
+            elif p.received_qty>0:p.status='Part received'
+            elif p.status=='Received':p.status='Open'
+        db.add(AuditLog(admin_id=request.employee.id,action='update_purchase_order',target=f'PO-{p.id}',detail=json.dumps(data)[:3000],created_at=now()))
+        return purchase_json(db,p)
+
+
+@app.get('/api/purchase-orders/<int:order_id>/print')
+@login_required(admin=True)
+def print_purchase_order(order_id):
+    with DB() as db:
+        p=db.get(PurchaseOrder,order_id)
+        if not p:abort(404,'Purchase order not found.')
+        row=purchase_json(db,p);supplier=db.get(Supplier,p.supplier_id)
+        esc=lambda v:html.escape(str(v or '—'))
+        content=f'''<!doctype html><html><head><meta charset="utf-8"><title>PO-{p.id} · Cosmos</title><link rel="stylesheet" href="/static/workspace.css"></head><body class="print-record"><h1>Cosmos Engineering Solutions</h1><h2>Purchase order · PO-{p.id}</h2><p>Supplier: {esc(supplier.name)}<br>GSTIN: {esc(supplier.gstin)}<br>Contact: {esc(supplier.contact)} · {esc(supplier.phone)}</p><p>Supplier reference: {esc(p.supplier_reference)}<br>Expected delivery: {esc(p.expected_date)}<br>Status: {esc(p.status)}</p><table><thead><tr><th>Item</th><th>Quantity</th><th>Unit price (₹)</th><th>Value (₹)</th></tr></thead><tbody><tr><td>{esc(row['item'])}</td><td>{esc(p.ordered_qty)} {esc(row['unit'])}</td><td>{esc(p.unit_price)}</td><td>{esc(row['order_value'])}</td></tr></tbody></table><p>Item value before tax and freight. Confirm the applicable charges with the supplier.</p><p>Notes: {esc(p.notes)}</p><p>Use your browser’s Print option to print or save as PDF.</p></body></html>'''
+        return Response(content,mimetype='text/html')
+
+
+def maintenance_json(db,t):
+    asset=db.get(CompanyAsset,t.asset_id);employee=db.get(Employee,t.assigned_id) if t.assigned_id else None
+    return dict(id=t.id,asset_id=t.asset_id,asset=asset.name,task_type=t.task_type,description=t.description,
+                due_date=t.due_date,completed_date=t.completed_date,status=t.status,downtime_hours=str(t.downtime_hours),
+                cost=str(t.cost),notes=t.notes,assigned_id=t.assigned_id,assigned=employee.name if employee else None,
+                service_activities=json_list(t.service_activities),checklist=json_list(t.checklist),parts_used=t.parts_used,
+                next_service_date=t.next_service_date,priority=t.priority or 'Normal')
+
+
+def apply_maintenance_fields(db,t,data):
+    if 'asset_id' in data:
+        aid=optional_id(data['asset_id'],'asset')
+        if not aid or not db.get(CompanyAsset,aid):abort(404,'Asset not found.')
+        t.asset_id=aid
+    if 'description' in data:t.description=clean_text(data,'description',5000)
+    if 'task_type' in data or 'service_activities' in data:
+        requested_type=data.get('task_type',t.task_type)
+        legacy_type=bool(t.id and requested_type==t.task_type and t.task_type not in (*SERVICE_TYPES,'Preventive service'))
+        # Existing historical classifications remain editable; new tasks use the shared list.
+        fields=service_fields(dict(service_type='Inspection' if legacy_type else requested_type,service_activities=data.get('service_activities',json_list(t.service_activities))))
+        if not fields['service_type']:abort(400,'Choose a service type.')
+        if not legacy_type:t.task_type=fields['service_type']
+        t.service_activities=fields['service_activities']
+    for key in ('due_date','next_service_date'):
+        if key in data:setattr(t,key,valid_iso_date(data[key],key.replace('_',' ')) if data[key] else None)
+    if 'assigned_id' in data:
+        eid=optional_id(data['assigned_id'],'employee');e=db.get(Employee,eid) if eid else None
+        if eid and (not e or not e.active):abort(400,'Choose an active employee.')
+        t.assigned_id=eid
+    if 'priority' in data:
+        if data['priority'] not in ('Normal','High','Urgent'):abort(400,'Choose a valid priority.')
+        t.priority=data['priority']
+    if 'checklist' in data:
+        rows=data['checklist']
+        if not isinstance(rows,list) or len(rows)>30:abort(400,'Use no more than 30 checklist items.')
+        for item in rows:
+            if not isinstance(item,dict) or not isinstance(item.get('label'),str) or not 1<=len(item['label'].strip())<=160 or type(item.get('done')) is not bool:
+                abort(400,'Enter valid checklist labels and completion states.')
+        t.checklist=json.dumps([dict(label=r['label'].strip(),done=r['done']) for r in rows])
+    if 'status' in data:
+        if data['status'] not in WORK_STATUSES:abort(400,'Choose a listed maintenance status.')
+        t.status=data['status']
+    if t.status in ('Completed','Closed'):
+        if any(not r['done'] for r in json_list(t.checklist)):abort(409,'Complete every checklist item before completing or closing this task.')
+        t.completed_date=valid_iso_date(data['completed_date'],'completion date') if data.get('completed_date') else t.completed_date or now().astimezone(LOCAL).date().isoformat()
+        if t.next_service_date:db.get(CompanyAsset,t.asset_id).next_service_date=t.next_service_date
+    else:t.completed_date=None
+    for key in ('cost','downtime_hours'):
+        if key in data:
+            value=quantity(data[key])
+            if value<0:abort(400,'Cost and downtime cannot be negative.')
+            setattr(t,key,value)
+    for key in ('notes','parts_used'):
+        if key in data:setattr(t,key,str(data[key] or '').strip()[:5000] or None)
+
+
+@app.get('/api/company-assets/<int:asset_id>/history')
+@login_required(admin=True)
+def asset_service_history(asset_id):
+    with DB() as db:
+        asset=db.get(CompanyAsset,asset_id)
+        if not asset:abort(404,'Asset not found.')
+        tasks=db.scalars(select(MaintenanceTask).where(MaintenanceTask.asset_id==asset_id).order_by(MaintenanceTask.id.desc())).all()
+        return dict(asset=asset_json(asset),tasks=[maintenance_json(db,t) for t in tasks],
+                    total_cost=str(sum((t.cost for t in tasks),Decimal(0))),total_downtime=str(sum((t.downtime_hours for t in tasks),Decimal(0))))
+
+
+def customer_update_json(row):
+    return dict(id=row.id,message=row.message,subject=row.subject,recipient_email=row.recipient_email,recipient_phone=row.recipient_phone,
+                status=row.status,channel=row.channel,created_at=aware(row.created_at).isoformat(),
+                sent_at=aware(row.sent_at).isoformat() if row.sent_at else None)
+
+
+def customer_update_context(db,w):
+    c=db.get(Customer,w.customer_id);m=db.get(CustomerMachine,w.machine_id) if w.machine_id else None
+    steps=db.scalars(select(ProductionStep).where(ProductionStep.work_order_id==w.id).order_by(ProductionStep.sequence,ProductionStep.id)).all()
+    contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id).order_by(CustomerContact.primary_contact.desc(),CustomerContact.id)).all()
+    return dict(job=work_order_json(db,w),customer=dict(name=c.name,email=c.email,phone=c.phone),
+                machine=machine_json(m,c,db.get(MachineType,m.machine_type_id) if m.machine_type_id else None) if m else None,
+                steps=[step_json(s) for s in steps],contacts=[dict(name=x.name,email=x.email,phone=x.phone) for x in contacts])
+
+
+@app.route('/api/work-orders/<int:job_id>/customer-updates',methods=['GET','POST'])
+@login_required(admin=True)
+def project_customer_updates(job_id):
+    with DB.begin() as db:
+        w=db.get(WorkOrder,job_id)
+        if not w:abort(404,'Work order not found.')
+        context=customer_update_context(db,w)
+        if request.method=='GET':
+            context['updates']=[customer_update_json(r) for r in db.scalars(select(CustomerUpdate).where(CustomerUpdate.work_order_id==job_id).order_by(CustomerUpdate.id.desc()).limit(30))]
+            return context
+        data=request.get_json(silent=True) or {}
+        # The reviewed message is stored as a draft. Delivery happens in the user's email or WhatsApp application.
+        message=clean_text(data,'message',10000);subject=clean_text(data,'subject',250)
+        email=str(data.get('recipient_email') or '').strip();phone=str(data.get('recipient_phone') or '').strip()
+        if email and (len(email)>160 or not re.fullmatch(r'[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+',email)):abort(400,'Enter one valid customer email address.')
+        if phone and not re.fullmatch(r'\+[1-9]\d{6,14}',phone):abort(400,'Use an international phone number, for example +919876543210.')
+        row=CustomerUpdate(work_order_id=job_id,message=message,subject=subject,recipient_email=email or None,recipient_phone=phone or None,
+                           status='Draft',created_by=request.employee.id,created_at=now())
+        db.add(row);db.flush()
+        db.add(AuditLog(admin_id=request.employee.id,action='customer_update_drafted',target=str(row.id),detail=w.code,created_at=now()))
+        return customer_update_json(row),201
+
+
+@app.patch('/api/customer-updates/<int:update_id>')
+@login_required(admin=True)
+def confirm_customer_update_sent(update_id):
+    data=request.get_json(silent=True) or {}
+    if data.get('sent_by_user') is not True or data.get('channel') not in ('Email','WhatsApp','Other'):abort(400,'Confirm the channel you used to send this update.')
+    with DB.begin() as db:
+        row=db.get(CustomerUpdate,update_id)
+        if not row:abort(404,'Update not found.')
+        if row.status!='Sent (manual)':
+            row.status='Sent (manual)';row.channel=data['channel'];row.sent_at=now()
+            db.add(AuditLog(admin_id=request.employee.id,action='customer_update_marked_sent',target=str(row.id),detail=row.channel,created_at=now()))
+        return customer_update_json(row)

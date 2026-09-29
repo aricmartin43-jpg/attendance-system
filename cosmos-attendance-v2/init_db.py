@@ -14,6 +14,24 @@ def initialise():
                 connection.execute(text(f'ALTER TABLE stock_items ADD COLUMN {column} VARCHAR(80)'))
         if 'service_product' not in {column['name'] for column in inspect(engine).get_columns('work_orders')}:
             connection.execute(text('ALTER TABLE work_orders ADD COLUMN service_product VARCHAR(180)'))
+        additions = {
+            'daily_plans': {'customer_id':'INTEGER REFERENCES customers(id)', 'machine_id':'INTEGER REFERENCES customer_machines(id)', 'due_date':'VARCHAR(10)', 'service_type':'VARCHAR(30)', 'service_activities':'TEXT'},
+            'work_orders': {'service_type':'VARCHAR(30)', 'service_activities':'TEXT', 'current_stage':'VARCHAR(60)', 'customer_remarks':'TEXT'},
+            'work_reports': {'service_type':'VARCHAR(30)', 'service_activities':'TEXT'},
+            'customer_machines': {'specifications':'TEXT', 'last_service_date':'VARCHAR(10)', 'next_service_date':'VARCHAR(10)'},
+            'purchase_orders': {'supplier_reference':'VARCHAR(100)', 'notes':'TEXT'},
+            'maintenance_tasks': {'service_activities':'TEXT', 'checklist':'TEXT', 'parts_used':'TEXT', 'next_service_date':'VARCHAR(10)', 'priority':'VARCHAR(20)'},
+        }
+        for table, columns in additions.items():
+            present = {c['name'] for c in inspect(connection).get_columns(table)}
+            for column, sql_type in columns.items():
+                if column not in present:
+                    connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {sql_type}'))
+        # Retain company transactions after a personal employee profile is deleted.
+        if engine.dialect.name == 'postgresql':
+            for table, column in [('meetings','created_by'),('stock_movements','actor_id'),('purchase_orders','created_by'),('private_documents','uploaded_by'),('quality_checks','inspector_id'),('dispatch_records','created_by')]:
+                if not next(c for c in inspect(connection).get_columns(table) if c['name']==column)['nullable']:
+                    connection.execute(text(f'ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL'))
     admin_code = os.getenv('ADMIN_USERNAME', 'admin').lower().strip()
     admin_pin = os.getenv('ADMIN_PIN', '').strip()
     if not re.fullmatch(r'\d{4}', admin_pin):
