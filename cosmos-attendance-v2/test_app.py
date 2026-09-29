@@ -64,7 +64,9 @@ def test_authentication_csrf_and_roles():
     assert c.get('/api/employees').status_code == 401
     assert c.post('/api/login', json={}).status_code == 403
     admin = client()
-    worker, eid = employee(admin)
+    created = post(admin, '/api/employees', dict(code='ces001', name='Test Employee', department='Production', pin='1234'))
+    assert created.status_code == 201
+    worker, eid = client('ces001', '1234'), created.json['id']
     assert worker.get('/api/employees').status_code == 403
     assert worker.get('/api/export?month=2026-09').status_code == 403
     assert post(worker, f'/api/employees/{eid}/enrol', dict(photo='fake',consent=True)).status_code == 403
@@ -380,3 +382,37 @@ def test_deadline_reminders_custom_dates_permissions_and_completed_filter():
             db.add(module.DailyPlan(employee_id=created.json['id'],work_date=today.isoformat(),title='Plan '+state,estimated_hours=1,status=state,created_at=module.now()))
     plans=[r for r in admin.get(path).json['items'] if r['kind']=='Planned task']
     assert len(plans)==1 and plans[0]['title']=='Plan Planned'
+
+
+def test_planning_preview_and_capacity_aware_assignment():
+    admin=client()
+    def add(code,name,department):
+        return post(admin,'/api/employees',dict(code=code,name=name,department=department,pin='1234')).json['id']
+    first=add('plan01','Asha','Production')
+    second=add('plan02','Bala','Production')
+    design=add('plan03','Dev','Design')
+    worker=client('plan01','1234')
+    path='/api/planning/workload?date=2026-10-01&department=Production&estimated_hours=2&daily_capacity=8'
+    assert worker.get(path).status_code==403
+    initial=admin.get(path).json
+    assert len(initial['employees'])==2 and initial['recommended_employee_id']==first
+    assert initial['employees'][0]['remaining_hours']==8
+    payload=dict(date='2026-10-01',title='Frame assembly',department='Production',estimated_hours=7,daily_capacity=8)
+    assigned=post(admin,'/api/daily-plans',payload)
+    assert assigned.status_code==201 and assigned.json['employee_id']==first
+    preview=admin.get(path).json
+    assert preview['recommended_employee_id']==second
+    assert next(e for e in preview['employees'] if e['id']==first)['fits'] is False
+    assigned2=post(admin,'/api/daily-plans',{**payload,'title':'Second frame'})
+    assert assigned2.status_code==201 and assigned2.json['employee_id']==second
+    assert admin.get(path).json['recommended_employee_id'] is None
+    assert post(admin,'/api/daily-plans',{**payload,'estimated_hours':2}).status_code==409
+    assert post(admin,'/api/daily-plans',{**payload,'estimated_hours':2,'daily_capacity':-1}).status_code==400
+    # Manual assignments are an explicit override, shown in the interface.
+    manual=post(admin,'/api/daily-plans',{**payload,'employee_id':first,'estimated_hours':2})
+    assert manual.status_code==201
+    assert next(e for e in admin.get(path).json['employees'] if e['id']==first)['planned_hours']==9
+    assert admin.patch('/api/daily-plans/'+str(assigned2.json['id']),json=dict(status='Cancelled'),headers={'X-CSRF-Token':admin.csrf}).status_code==200
+    assert admin.get(path).json['recommended_employee_id']==second
+    assert admin.get(path.replace('daily_capacity=8','daily_capacity=NaN')).status_code==400
+    assert admin.get(path.replace('2026-10-01','invalid')).status_code==400

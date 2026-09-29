@@ -12,7 +12,7 @@ function donutChart(parts,centreLabel){
     return `<circle cx="50" cy="50" r="42" pathLength="100" fill="none" stroke="${escapeHTML(p.color)}" stroke-width="16" stroke-dasharray="${percent} ${100-percent}" stroke-dashoffset="${-start}" transform="rotate(-90 50 50)"><title>${escapeHTML(p.label)}: ${p.value} (${Math.round(percent)}%)</title></circle>`;
   }).join('');
   const label=total?values.map(p=>`${p.label}: ${p.value}`).join(', '):'No records yet';
-  return `<div class="donut-layout"><div class="donut-chart svg-donut" role="img" aria-label="${escapeHTML(centreLabel+': '+label)}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="42" fill="none" stroke="#e2eaf3" stroke-width="16"/>${segments}</svg><div class="donut-hole"><strong>${total}</strong><span>${escapeHTML(centreLabel)}</span></div></div><ul class="donut-legend">${values.map(p=>`<li><span class="donut-swatch" style="background:${escapeHTML(p.color)}"></span><span>${escapeHTML(p.label)}</span><strong>${p.value}</strong></li>`).join('')}${total?'':'<li class="donut-no-data">No records yet</li>'}</ul></div>`;
+  return `<div class="donut-layout"><div class="donut-chart svg-donut" role="img" aria-label="${escapeHTML(centreLabel+': '+label)}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="42" fill="none" stroke="#e2eaf3" stroke-width="16"/>${segments}</svg><div class="donut-hole"><strong>${total}</strong><span>${escapeHTML(centreLabel)}</span></div></div><ul class="donut-legend">${values.map(p=>`<li><svg class="donut-swatch" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="5" fill="${escapeHTML(p.color)}"/></svg><span>${escapeHTML(p.label)}</span><strong>${p.value}</strong></li>`).join('')}${total?'':'<li class="donut-no-data">No records yet</li>'}</ul></div>`;
 }
 function progressRing(percent,total,color,label){
   const value=Math.max(0,Math.min(100,percent));
@@ -59,7 +59,7 @@ async function refreshOverview() {
 }
 async function refreshEmployees() {
   team = await api('/api/employees');
-  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Build your Cosmos team</strong>Add your first employee and assign a secure 4-digit PIN.</div>'; return; }
+  if (!team.length) { $('employee-table').innerHTML = '<div class="empty"><strong>Your team starts here</strong>Add your first employee and assign a secure 4-digit PIN.</div>'; return; }
   $('employee-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Access</th><th>Actions</th></tr></thead><tbody>${team.map(e => `<tr><td>${personCell(e.name,e.code)}</td><td>${escapeHTML(e.department)}</td><td>${e.active ? 'Active' : 'Inactive'}</td><td><div class="action-buttons"><button class="small-button" data-profile="${e.id}">Profile & points</button><button class="small-button" data-file="${e.id}">File</button><button class="small-button" data-edit="${e.id}">Edit</button><button class="small-button" data-pin="${e.id}">Reset PIN</button><button class="small-button" data-toggle="${e.id}">${e.active ? 'Deactivate' : 'Activate'}</button><button class="small-button danger" data-delete="${e.id}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 let selectedEmployeeProfileId=null;
@@ -205,14 +205,16 @@ async function showMachineHistory(id){
 async function refreshJobs(){
   jobs=await api('/api/work-orders');
   if(!jobs.length){$('job-table').innerHTML='<div class="empty"><strong>No work orders yet</strong>Create a work order and assign responsibility.</div>';return;}
-  $('job-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Customer</th><th>Machine</th><th>Owner</th><th>Assigned</th><th>Target</th><th>Status</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${jobs.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small class="muted">${escapeHTML(j.title)} · ${escapeHTML(j.work_type)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.machine_no||j.machine_code||'General')}</td><td>${escapeHTML(j.job_owner?.name||'—')}</td><td class="wrap-cell">${escapeHTML(j.assignments.map(a=>a.employee+' ('+a.role+')').join(', ')||'—')}</td><td>${escapeHTML(j.target_date||'—')}</td><td>${statusPill(j.status)}</td>${user.admin?`<td><button class="small-button" data-job-status="${j.id}" data-current="${escapeHTML(j.status)}">Update</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  $('job-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Work order</th><th>Customer</th><th>Machine</th><th>Responsible person</th><th>Assigned team</th><th>Deadline</th><th>Status</th>${user.admin?'<th>Actions</th>':''}</tr></thead><tbody>${jobs.map(j=>`<tr><td><strong>${escapeHTML(j.code)}</strong><small class="muted">${escapeHTML(j.title)} · ${escapeHTML(j.work_type)}</small></td><td>${escapeHTML(j.customer||'—')}</td><td>${escapeHTML(j.machine_no||j.machine_code||'General')}</td><td>${escapeHTML(j.job_owner?.name||'—')}</td><td class="wrap-cell">${escapeHTML(j.assignments.map(a=>a.employee+' ('+a.role+')').join(', ')||'—')}</td><td>${escapeHTML(j.target_date||'—')}</td><td>${statusPill(j.status)}</td>${user.admin?`<td><button class="small-button" data-job-status="${j.id}" data-current="${escapeHTML(j.status)}">Update</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
 }
 async function refreshPlanning(){
   const date=$('plan-date').value||today;
-  const rows=await api('/api/daily-plans?date='+encodeURIComponent(date));
+  const [rows,workload]=await Promise.all([api('/api/daily-plans?date='+encodeURIComponent(date)),user.admin?api('/api/planning/workload?date='+encodeURIComponent(date)):Promise.resolve(null)]);
+  $('plan-workload').hidden=!user.admin;
+  if(workload)$('plan-workload').innerHTML=`<div class="workload-heading"><h3>Team workload</h3><span class="subtle-tag">8-hour planning reference</span></div><div class="workload-grid">${workload.employees.map(e=>`<article class="workload-card ${e.planned_hours>8?'over-capacity':''}"><div><strong>${escapeHTML(e.name)}</strong><span>${e.planned_hours.toFixed(1)} h booked</span></div><div class="workload-track" role="img" aria-label="${escapeHTML(e.name)}: ${e.planned_hours} of 8 reference hours"><svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect width="${Math.min(100,e.planned_hours/8*100)}" height="6" rx="3" class="workload-fill"/></svg></div><small>${escapeHTML(e.department)} · ${e.planned_hours>8?(e.planned_hours-8).toFixed(1)+' h above reference':e.remaining_hours.toFixed(1)+' h remaining'}</small></article>`).join('')}</div><p class="help">Based on non-cancelled plans for this date. Leave, skills, shifts and machine availability are not included.</p>`;
   const hours=rows.filter(r=>r.status!=='Cancelled').reduce((sum,r)=>sum+r.estimated_hours,0);
-  $('plan-summary').innerHTML=`<article class="stat"><span>Planned tasks</span><strong>${rows.length}</strong></article><article class="stat"><span>Estimated hours</span><strong>${hours.toFixed(1)}</strong></article><article class="stat"><span>Assigned people</span><strong>${new Set(rows.filter(r=>r.status!=='Cancelled').map(r=>r.employee_id)).size}</strong></article>`;
-  $('plan-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Priority</th><th>Task</th><th>Work order</th><th>Employee</th><th>Hours</th><th>Status</th><th>Update</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.priority)}</td><td><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.department||'Any department')} · ${escapeHTML(r.details||'')}</small></td><td>${escapeHTML(r.work_order||'—')}</td><td>${escapeHTML(r.employee)}</td><td>${escapeHTML(r.estimated_hours)}</td><td>${statusPill(r.status)}</td><td><select aria-label="Update ${escapeHTML(r.title)}" data-plan-status="${r.id}"><option value="">Change status</option>${(user.admin?['Planned','In Progress','Completed','Blocked','Cancelled']:['In Progress','Completed','Blocked']).map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>No work planned for this date</strong>Choose another date or add a task.</div>';
+  $('plan-summary').innerHTML=`<article class="stat"><span>Planned tasks</span><strong>${rows.length}</strong></article><article class="stat"><span>Estimated hours</span><strong>${hours.toFixed(1)}</strong></article><article class="stat"><span>Team members assigned</span><strong>${new Set(rows.filter(r=>r.status!=='Cancelled').map(r=>r.employee_id)).size}</strong></article>`;
+  $('plan-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Priority</th><th>Task</th><th>Work order</th><th>Employee</th><th>Hours</th><th>Status</th><th>Update</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.priority)}</td><td><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.department||'Any department')} · ${escapeHTML(r.details||'')}</small></td><td>${escapeHTML(r.work_order||'—')}</td><td>${escapeHTML(r.employee)}</td><td>${escapeHTML(r.estimated_hours)}</td><td>${statusPill(r.status)}</td><td><select aria-label="Update ${escapeHTML(r.title)}" data-plan-status="${r.id}"><option value="">Change status</option>${(user.admin?['Planned','In Progress','Completed','Blocked','Cancelled']:['In Progress','Completed','Blocked']).map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><strong>Your day is ready to plan</strong>Add the first task or select another date.</div>';
 }
 async function openPlanDialog(){
   await ensureTeam();
@@ -220,8 +222,9 @@ async function openPlanDialog(){
   $('plan-form').reset();$('plan-form-date').value=$('plan-date').value||today;
   const departments=[...new Set(team.filter(e=>e.active).map(e=>e.department).filter(Boolean))].sort();
   $('plan-department').innerHTML='<option value="">Any department</option>'+departments.map(d=>`<option value="${escapeHTML(d)}">${escapeHTML(d)}</option>`).join('');
-  $('plan-employee').innerHTML='<option value="">Assign automatically by planned hours</option>'+team.filter(e=>e.active).map(e=>`<option value="${e.id}">${escapeHTML(e.name)} · ${escapeHTML(e.department)}</option>`).join('');
+  $('plan-employee').innerHTML='<option value="">Automatic · balance planned hours</option>'+team.filter(e=>e.active).map(e=>`<option value="${e.id}">${escapeHTML(e.name)} · ${escapeHTML(e.department)}</option>`).join('');
   $('plan-work-order').innerHTML='<option value="">No work order</option>'+jobs.map(j=>`<option value="${j.id}">${escapeHTML(j.code)} · ${escapeHTML(j.title)}</option>`).join('');
+  $('plan-assignment-preview').className='assignment-preview';$('plan-assignment-preview').textContent='Preview shows who has room for this task within your daily planning limit.';
   $('plan-dialog').showModal();
 }
 async function openCustomerDialog(){$('customer-form').reset();$('customer-dialog-title').textContent='Add customer';$('customer-dialog').showModal();}
@@ -279,7 +282,7 @@ async function refreshWork(){
 async function refreshIssues(){
   const rows=await api('/api/issues');
   if(!rows.length){$('issues-table').innerHTML='<div class="empty"><strong>No problems recorded</strong>Reported difficulties and their resolutions will appear here.</div>';return;}
-  $('issues-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Category</th><th>Problem</th><th>Status</th><th>Resolution</th>${user.admin?'<th>Action</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td>${escapeHTML(r.category)}</td><td class="wrap-cell"><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.detail)}</small></td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.resolution||'—')}</td>${user.admin?`<td><button class="small-button" data-issue-resolve="${r.id}">${r.status==='Resolved'?'Edit resolution':'Resolve'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  $('issues-table').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Date</th><th>Category</th><th>Problem</th><th>Status</th><th>Resolution</th>${user.admin?'<th>Actions</th>':''}</tr></thead><tbody>${rows.map(r=>`<tr><td>${personCell(r.employee,r.code)}</td><td>${escapeHTML(r.date)}</td><td>${escapeHTML(r.category)}</td><td class="wrap-cell"><strong>${escapeHTML(r.title)}</strong><small class="muted">${escapeHTML(r.detail)}</small></td><td>${statusPill(r.status)}</td><td class="wrap-cell">${escapeHTML(r.resolution||'—')}</td>${user.admin?`<td><button class="small-button" data-issue-resolve="${r.id}">${r.status==='Resolved'?'Edit resolution':'Resolve'}</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
 }
 async function refreshMeetings(){
   const rows=await api('/api/meetings');
@@ -305,24 +308,24 @@ async function refreshStock(){
 }
 async function showStockHistory(id){
   const rows=await api('/api/stock-items/'+id+'/movements');
-  $('stock-history').innerHTML=`<div class="section-card"><h3>Movement history · ${escapeHTML(stockItems.find(x=>x.id===Number(id))?.sku||id)}</h3>${rows.length?`<div class="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Change</th><th>Balance</th><th>Job</th><th>Reason / reference</th></tr></thead><tbody>${rows.map(m=>`<tr><td>${escapeHTML(new Date(m.at).toLocaleString('en-IN'))}</td><td>${escapeHTML(m.kind)}</td><td>${escapeHTML(m.change)}</td><td>${escapeHTML(m.balance)}</td><td>${escapeHTML(m.work_order_id||'—')}</td><td>${escapeHTML(m.reason)} · ${escapeHTML(m.reference||'')}</td></tr>`).join('')}</tbody></table></div>`:'<p>No movements yet.</p>'}</div>`;
+  $('stock-history').innerHTML=`<div class="section-card"><h3>Movement history · ${escapeHTML(stockItems.find(x=>x.id===Number(id))?.sku||id)}</h3>${rows.length?`<div class="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Change</th><th>Balance</th><th>Work order</th><th>Reason / reference</th></tr></thead><tbody>${rows.map(m=>`<tr><td>${escapeHTML(new Date(m.at).toLocaleString('en-IN'))}</td><td>${escapeHTML(m.kind)}</td><td>${escapeHTML(m.change)}</td><td>${escapeHTML(m.balance)}</td><td>${escapeHTML(m.work_order_id||'—')}</td><td>${escapeHTML(m.reason)} · ${escapeHTML(m.reference||'')}</td></tr>`).join('')}</tbody></table></div>`:'<p>No movements yet.</p>'}</div>`;
 }
 async function refreshPurchasing(){
   const [s,orders]=await Promise.all([api('/api/suppliers'),api('/api/purchase-orders')]);suppliers=s;
-  $('supplier-table').innerHTML=`<h3>Suppliers</h3>${s.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GSTIN</th></tr></thead><tbody>${s.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.contact||'—')}</td><td>${escapeHTML(x.phone||'—')}</td><td>${escapeHTML(x.gstin||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No suppliers yet.</p>'}`;
-  $('purchase-table').innerHTML=`<h3>Purchase orders</h3>${orders.length?`<div class="table-wrap"><table><thead><tr><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Status</th><th>Action</th></tr></thead><tbody>${orders.map(x=>`<tr><td>PO-${x.id}</td><td>${escapeHTML(x.supplier)}</td><td>${escapeHTML(x.item)}</td><td>${escapeHTML(x.ordered_qty)}</td><td>${escapeHTML(x.received_qty)}</td><td>${escapeHTML(x.status)}</td><td>${x.status==='Received'? 'Complete':`<button class="small-button" data-po-receive="${x.id}" data-outstanding="${Number(x.ordered_qty)-Number(x.received_qty)}">Receive</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No purchase orders yet.</p>'}`;
+  $('supplier-table').innerHTML=`<h3>Supplier directory</h3>${s.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>GSTIN</th></tr></thead><tbody>${s.map(x=>`<tr><td>${escapeHTML(x.name)}</td><td>${escapeHTML(x.contact||'—')}</td><td>${escapeHTML(x.phone||'—')}</td><td>${escapeHTML(x.gstin||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No suppliers yet.</p>'}`;
+  $('purchase-table').innerHTML=`<h3>Purchase orders</h3>${orders.length?`<div class="table-wrap"><table><thead><tr><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Status</th><th>Actions</th></tr></thead><tbody>${orders.map(x=>`<tr><td>PO-${x.id}</td><td>${escapeHTML(x.supplier)}</td><td>${escapeHTML(x.item)}</td><td>${escapeHTML(x.ordered_qty)}</td><td>${escapeHTML(x.received_qty)}</td><td>${escapeHTML(x.status)}</td><td>${x.status==='Received'? 'Complete':`<button class="small-button" data-po-receive="${x.id}" data-outstanding="${Number(x.ordered_qty)-Number(x.received_qty)}">Receive</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No purchase orders yet.</p>'}`;
 }
 async function refreshProduction(){
   const [steps,orders]=await Promise.all([api('/api/production-steps'),api('/api/work-orders')]);
   const byId=new Map(orders.map(j=>[j.id,j]));
-  $('production-table').innerHTML=steps.length?`<div class="table-wrap"><table><thead><tr><th>Job</th><th>Sequence / operation</th><th>Plan</th><th>Hours plan / actual</th><th>Accepted / rejected</th><th>Status</th><th>Action</th></tr></thead><tbody>${steps.map(s=>`<tr><td>${escapeHTML(byId.get(s.work_order_id)?.code||s.work_order_id)}</td><td>${s.sequence} · ${escapeHTML(s.operation)}</td><td>${escapeHTML(s.planned_date||'—')}</td><td>${escapeHTML(s.planned_hours)} / ${escapeHTML(s.actual_hours)}</td><td>${escapeHTML(s.accepted_qty)} / ${escapeHTML(s.rejected_qty)}</td><td>${escapeHTML(s.status)}${s.delay_reason?`<small>${escapeHTML(s.delay_reason)}</small>`:''}</td><td><button class="small-button" data-step-update="${s.id}">Update</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Add operations to a work order to plan production.</p>';
+  $('production-table').innerHTML=steps.length?`<div class="table-wrap"><table><thead><tr><th>Work order</th><th>Sequence / operation</th><th>Plan</th><th>Hours plan / actual</th><th>Accepted / rejected</th><th>Status</th><th>Actions</th></tr></thead><tbody>${steps.map(s=>`<tr><td>${escapeHTML(byId.get(s.work_order_id)?.code||s.work_order_id)}</td><td>${s.sequence} · ${escapeHTML(s.operation)}</td><td>${escapeHTML(s.planned_date||'—')}</td><td>${escapeHTML(s.planned_hours)} / ${escapeHTML(s.actual_hours)}</td><td>${escapeHTML(s.accepted_qty)} / ${escapeHTML(s.rejected_qty)}</td><td>${escapeHTML(s.status)}${s.delay_reason?`<small>${escapeHTML(s.delay_reason)}</small>`:''}</td><td><button class="small-button" data-step-update="${s.id}">Update</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">Add operations to a work order to plan production.</p>';
 }
 let maintenanceAssets=[],maintenanceTasks=[];
 async function refreshMaintenance(){
   const [assets,tasks]=await Promise.all([api('/api/company-assets'),api('/api/maintenance-tasks')]);
   maintenanceAssets=assets;maintenanceTasks=tasks;
-  $('asset-table').innerHTML=`<h3>Company assets</h3>${assets.length?`<div class="table-wrap"><table><thead><tr><th>Code</th><th>Kind / name</th><th>Registration / serial</th><th>Next service</th><th>Action</th></tr></thead><tbody>${assets.map(a=>`<tr><td>${escapeHTML(a.code)}</td><td>${escapeHTML(a.kind)} · ${escapeHTML(a.name)}</td><td>${escapeHTML(a.serial_or_registration||'—')}</td><td>${escapeHTML(a.next_service_date||'—')}</td><td><button class="small-button" data-asset-edit="${a.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No company assets yet.</p>'}`;
-  $('maintenance-table').innerHTML=`<h3>Maintenance tasks</h3>${tasks.length?`<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type / work</th><th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>${tasks.map(t=>`<tr><td>${escapeHTML(t.asset)}</td><td>${escapeHTML(t.task_type)} · ${escapeHTML(t.description)}</td><td>${escapeHTML(t.due_date||'—')}</td><td>${escapeHTML(t.status)}</td><td><button class="small-button" data-task-edit="${t.id}">Edit</button> ${t.status==='Completed'?'Done':`<button class="small-button" data-task-complete="${t.id}">Complete</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No maintenance tasks yet.</p>'}`;
+  $('asset-table').innerHTML=`<h3>Company assets</h3>${assets.length?`<div class="table-wrap"><table><thead><tr><th>Code</th><th>Kind / name</th><th>Registration / serial</th><th>Next service</th><th>Actions</th></tr></thead><tbody>${assets.map(a=>`<tr><td>${escapeHTML(a.code)}</td><td>${escapeHTML(a.kind)} · ${escapeHTML(a.name)}</td><td>${escapeHTML(a.serial_or_registration||'—')}</td><td>${escapeHTML(a.next_service_date||'—')}</td><td><button class="small-button" data-asset-edit="${a.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No company assets yet.</p>'}`;
+  $('maintenance-table').innerHTML=`<h3>Maintenance tasks</h3>${tasks.length?`<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type / work</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>${tasks.map(t=>`<tr><td>${escapeHTML(t.asset)}</td><td>${escapeHTML(t.task_type)} · ${escapeHTML(t.description)}</td><td>${escapeHTML(t.due_date||'—')}</td><td>${escapeHTML(t.status)}</td><td><button class="small-button" data-task-edit="${t.id}">Edit</button> ${t.status==='Completed'?'Done':`<button class="small-button" data-task-complete="${t.id}">Complete</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No maintenance tasks yet.</p>'}`;
 }
 async function refreshAnalytics(){
   const [data,storage]=await Promise.all([api('/api/management-summary'),api('/api/storage-summary')]);
@@ -332,7 +335,7 @@ async function refreshAnalytics(){
 }
 async function refreshQuotations(){
   const rows=await api('/api/quotations');
-  $('quotation-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Quote</th><th>Customer / scope</th><th>Amount ₹</th><th>Follow up</th><th>Status</th><th>Work order</th><th>Action</th></tr></thead><tbody>${rows.map(q=>`<tr><td>${escapeHTML(q.code)} <small>Rev ${q.revision}</small></td><td>${escapeHTML(q.customer)}<small>${escapeHTML(q.title)}</small></td><td>${escapeHTML(q.amount)}</td><td>${escapeHTML(q.follow_up_date||'—')}</td><td>${escapeHTML(q.status)}</td><td>${escapeHTML(q.work_order_id||'—')}</td><td>${q.work_order_id?'Converted':`<button class="small-button" data-quote-status="${q.id}">Status</button> <button class="small-button" data-quote-accept="${q.id}">Accept PO</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No quotations yet.</p>';
+  $('quotation-table').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Quote</th><th>Customer / scope</th><th>Amount ₹</th><th>Follow up</th><th>Status</th><th>Work order</th><th>Actions</th></tr></thead><tbody>${rows.map(q=>`<tr><td>${escapeHTML(q.code)} <small>Rev ${q.revision}</small></td><td>${escapeHTML(q.customer)}<small>${escapeHTML(q.title)}</small></td><td>${escapeHTML(q.amount)}</td><td>${escapeHTML(q.follow_up_date||'—')}</td><td>${escapeHTML(q.status)}</td><td>${escapeHTML(q.work_order_id||'—')}</td><td>${q.work_order_id?'Converted':`<button class="small-button" data-quote-status="${q.id}">Status</button> <button class="small-button" data-quote-accept="${q.id}">Accept PO</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No quotations yet.</p>';
 }
 async function refreshJobFiles(){
   const jobs=await api('/api/work-orders'),select=$('job-file-select'),current=select.value;
@@ -341,8 +344,8 @@ async function refreshJobFiles(){
   if(!select.value){$('job-material-table').innerHTML='<p>Create a work order first.</p>';$('job-drawing-table').innerHTML='';return;}
   const id=select.value,[materials,drawings,items,documents,quality,dispatch]=await Promise.all([api('/api/work-orders/'+id+'/materials'),api('/api/work-orders/'+id+'/drawings'),api('/api/stock-items'),api('/api/documents/job/'+id),api('/api/work-orders/'+id+'/quality'),api('/api/work-orders/'+id+'/dispatch')]);
   const itemMap=new Map(items.map(x=>[x.id,x]));
-  $('job-material-table').innerHTML=`<h3>Material requirements</h3>${materials.length?`<div class="table-wrap"><table><thead><tr><th>Material</th><th>Required</th><th>Reserved</th><th>Issued</th><th>Available</th><th>Action</th></tr></thead><tbody>${materials.map(m=>`<tr><td>${escapeHTML(m.sku)} · ${escapeHTML(m.item)}</td><td>${escapeHTML(m.required)}</td><td>${escapeHTML(m.reserved)}</td><td>${escapeHTML(m.issued)}</td><td>${escapeHTML(itemMap.get(m.item_id)?.available||'—')}</td><td><button class="small-button" data-material-action="reserve" data-requirement="${m.id}">Reserve</button> <button class="small-button" data-material-action="issue" data-requirement="${m.id}">Issue</button> <button class="small-button" data-material-action="release" data-requirement="${m.id}">Release</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No material requirements yet.</p>'}`;
-  $('job-drawing-table').innerHTML=`<h3>Drawing revisions</h3>${drawings.length?`<div class="table-wrap"><table><thead><tr><th>Drawing</th><th>Revision</th><th>File reference</th><th>Status</th><th>Action</th></tr></thead><tbody>${drawings.map(d=>`<tr><td>${escapeHTML(d.drawing_no)}</td><td>${escapeHTML(d.revision)}</td><td>${escapeHTML(d.file_reference)}</td><td>${d.approved?'Approved':'Pending'}</td><td>${d.approved?'Current':`<button class="small-button" data-drawing-approve="${d.id}">Approve</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No drawing revisions yet.</p>'}`;
+  $('job-material-table').innerHTML=`<h3>Material requirements</h3>${materials.length?`<div class="table-wrap"><table><thead><tr><th>Material</th><th>Required</th><th>Reserved</th><th>Issued</th><th>Available</th><th>Actions</th></tr></thead><tbody>${materials.map(m=>`<tr><td>${escapeHTML(m.sku)} · ${escapeHTML(m.item)}</td><td>${escapeHTML(m.required)}</td><td>${escapeHTML(m.reserved)}</td><td>${escapeHTML(m.issued)}</td><td>${escapeHTML(itemMap.get(m.item_id)?.available||'—')}</td><td><button class="small-button" data-material-action="reserve" data-requirement="${m.id}">Reserve</button> <button class="small-button" data-material-action="issue" data-requirement="${m.id}">Issue</button> <button class="small-button" data-material-action="release" data-requirement="${m.id}">Release</button></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No material requirements yet.</p>'}`;
+  $('job-drawing-table').innerHTML=`<h3>Drawing revisions</h3>${drawings.length?`<div class="table-wrap"><table><thead><tr><th>Drawing</th><th>Revision</th><th>File reference</th><th>Status</th><th>Actions</th></tr></thead><tbody>${drawings.map(d=>`<tr><td>${escapeHTML(d.drawing_no)}</td><td>${escapeHTML(d.revision)}</td><td>${escapeHTML(d.file_reference)}</td><td>${d.approved?'Approved':'Pending'}</td><td>${d.approved?'Current':`<button class="small-button" data-drawing-approve="${d.id}">Approve</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No drawing revisions yet.</p>'}`;
   $('job-documents').innerHTML='<h3>Private documents</h3>'+documentLinks(documents);
   $('job-quality').innerHTML='<h3>Quality checks</h3>'+(quality.map(q=>`<p>${escapeHTML(q.operation)} · ${escapeHTML(q.result)} · accepted ${escapeHTML(q.accepted)}, rejected ${escapeHTML(q.rejected)} ${escapeHTML(q.defect||'')}</p>`).join('')||'<p class="muted">No inspections yet.</p>');
   $('job-dispatch').innerHTML='<h3>Dispatch</h3>'+(dispatch.map(d=>`<p>${escapeHTML(d.date)} · ${escapeHTML(d.quantity)} · ${escapeHTML(d.transporter||'')} · ${escapeHTML(d.tracking_reference||'')}</p>`).join('')||'<p class="muted">No dispatch recorded.</p>');
@@ -364,7 +367,7 @@ async function refreshReminders(){
 }
 function renderReminders(){
   const filter=$('reminder-filter').value,rows=deadlineItems.filter(r=>filter==='all'||(filter==='overdue'?r.days<0:filter==='today'?r.days===0:r.days<=7));
-  $('reminder-list').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Deadline</th><th>Status</th><th>Type</th><th>Work / reminder</th><th>Action</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.due_date)}</td><td><span class="pill">${escapeHTML(r.urgency)}</span><small>${r.days<0?Math.abs(r.days)+' days overdue':r.days===0?'Today':'In '+r.days+' days'}</small></td><td>${escapeHTML(r.kind)}</td><td><strong>${escapeHTML(r.title)}</strong><small>${escapeHTML(r.notes||'')}</small><small>Record #${r.id}</small></td><td>${r.kind==='Custom'?`<button class="small-button" data-reminder-complete="${r.id}">Complete</button><button class="small-button" data-reminder-date="${r.id}">Change date</button>`:`<button class="small-button" data-reminder-view="${r.view}">Open module</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="help">No open deadlines match this filter.</p>';
+  $('reminder-list').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Deadline</th><th>Status</th><th>Type</th><th>Work / reminder</th><th>Actions</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHTML(r.due_date)}</td><td><span class="pill">${escapeHTML(r.urgency)}</span><small>${r.days<0?Math.abs(r.days)+' days overdue':r.days===0?'Today':'In '+r.days+' days'}</small></td><td>${escapeHTML(r.kind)}</td><td><strong>${escapeHTML(r.title)}</strong><small>${escapeHTML(r.notes||'')}</small><small>Record #${r.id}</small></td><td>${r.kind==='Custom'?`<button class="small-button" data-reminder-complete="${r.id}">Complete</button><button class="small-button" data-reminder-date="${r.id}">Change date</button>`:`<button class="small-button" data-reminder-view="${r.view}">Open module</button>`}</td></tr>`).join('')}</tbody></table></div>`:'<p class="help">No open deadlines match this filter.</p>';
 }
 $('refresh-reminders').addEventListener('click',()=>perform(refreshReminders));
 $('reminder-filter').addEventListener('change',renderReminders);
@@ -406,7 +409,7 @@ async function refreshHome(){
   const days=Array.from({length:7},(_,i)=>{const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-6+i);return d.toISOString().slice(0,10);});
   const monthRecords=(await Promise.all([...new Set(days.map(d=>d.slice(0,7)))].map(m=>api('/api/attendance?month='+m)))).flat();
   const activeCodes=new Set(activePeople.map(e=>e.code));
-  $('home-week-chart').innerHTML='<div class="week-bars">'+days.map(day=>{const n=new Set(monthRecords.filter(r=>r.date===day&&activeCodes.has(r.code)).map(r=>r.code)).size;const pct=activePeople.length?Math.round(n/activePeople.length*100):0;return `<div class="week-column" aria-label="${day}: ${n} checked in, ${pct}%"><strong>${activePeople.length?pct+'%':'—'}</strong><div class="week-track"><span style="height:${pct}%"></span></div><small>${new Date(day+'T12:00:00Z').toLocaleDateString('en',{weekday:'short',timeZone:'UTC'})}</small></div>`;}).join('')+'</div>';
+  $('home-week-chart').innerHTML='<div class="week-bars">'+days.map(day=>{const n=new Set(monthRecords.filter(r=>r.date===day&&activeCodes.has(r.code)).map(r=>r.code)).size;const pct=activePeople.length?Math.round(n/activePeople.length*100):0;return `<div class="week-column" aria-label="${day}: ${n} checked in, ${pct}%"><strong>${activePeople.length?pct+'%':'—'}</strong><div class="week-track"><svg viewBox="0 0 36 100" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="${100-pct}" width="36" height="${pct}" rx="2" fill="#258bfa"/></svg></div><small>${new Date(day+'T12:00:00Z').toLocaleDateString('en',{weekday:'short',timeZone:'UTC'})}</small></div>`;}).join('')+'</div>';
   $('home-team-table').innerHTML=activePeople.length?`<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Department</th><th>Last 7 days</th><th>Today</th></tr></thead><tbody>${activePeople.slice(0,5).map(e=>{const n=new Set(monthRecords.filter(r=>r.code===e.code&&days.includes(r.date)).map(r=>r.date)).size;return `<tr><td><strong>${escapeHTML(e.name)}</strong></td><td>${escapeHTML(e.department||'—')}</td><td>${n} check-in days</td><td><span class="attendance-chip ${presentIds.has(e.code)?'present':''}">${presentIds.has(e.code)?'Checked in':'No check-in'}</span></td></tr>`;}).join('')}</tbody></table></div>`:'<p class="dashboard-empty">No active employees yet.</p>';
   $('home-recent').innerHTML=attendance.length?[...attendance].sort((a,b)=>b.check_in.localeCompare(a.check_in)).slice(0,4).map(r=>`<div class="recent-checkin"><span class="recent-icon">${moduleIcon('overview')}</span><div><strong>${escapeHTML(r.employee)}</strong><small>${escapeHTML(r.department||'Team member')} · Checked in</small></div><time>${new Date(r.check_in).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',timeZone:zone})}</time></div>`).join(''):'<p class="dashboard-empty">No check-ins recorded today.</p>';
   $('home-shortcuts').innerHTML=[['employees','Employees'],['overview','Attendance'],['planning','Plan tasks'],['jobs','Work orders'],['customers','Customers'],['inventory','Inventory'],['analytics','Reports'],['maintenance','Maintenance']].map(([view,label])=>`<button data-home-view="${view}">${moduleIcon(view)}<span>${label}</span></button>`).join('');
@@ -422,23 +425,23 @@ const views = {
   reminders:['Deadline reminders','Track overdue work, upcoming dates and custom reminders.','◷'],
   home:['Employee Portal','People · Productivity · Progress','▦'],
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
-  ecosystem:['Company memory','Work, problems and decisions in one connected system.','◈'],
-  customers:['Customers','Companies, contacts, machines and complete relationship history.','⌂'],
-  machines:['Machines','Customer machines with permanent IDs and lifetime history.','⚙'],
+  ecosystem:['Operations library','Work records, resolved issues and team decisions.','◈'],
+  customers:['Customer relationships','Company profiles, key contacts and service history.','⌂'],
+  machines:['Customer equipment','Installed machines, service records and the people who maintain them.','⚙'],
   jobs:['Work orders','Responsibility, assignments and customer work in one place.','▰'],
-  planning:['Daily planning','Upcoming tasks and employee assignments.','▦'],
+  planning:['Work planner','A clear view of priorities, team workloads and upcoming assignments.','▦'],
   quotations:['Quotations','Enquiries, follow-ups and customer purchase orders.','▣'],
-  'job-files':['Job files','Materials, reservations and approved drawings by work order.','▤'],
-  inventory:['Inventory','Items, available quantities and stock movements.','▥'],
-  purchasing:['Purchasing','Suppliers, orders and goods received.','◫'],
-  production:['Production planning','Operations from drawing to dispatch.','▧'],
-  maintenance:['Maintenance','Company machines, bikes and service tasks.','⚒'],
-  analytics:['Management summary','Live company operating measures.','◉'],
-  employees:['Employees','The people behind every working day.','⊞'],
-  work:['Daily work','Jobs completed, progress, machines and difficulties.','▣'],
-  issues:['Problems & issues','Problems reported, ownership and resolutions.','△'],
+  'job-files':['Work order files','Drawings, materials, quality records and delivery documents.','▤'],
+  inventory:['Materials & inventory','Stock availability, reservations and replenishment.','▥'],
+  purchasing:['Procurement','Suppliers, purchase commitments and incoming materials.','◫'],
+  production:['Production workflow','Plan each operation and follow its progress to dispatch.','▧'],
+  maintenance:['Asset care','Equipment, vehicles and service schedules.','⚒'],
+  analytics:['Business overview','Operational measures to support your daily decisions.','◉'],
+  employees:['People & performance','Employee profiles, attendance and recorded contributions.','⊞'],
+  work:['Work journal','Capture progress, completed work and support needed.','▣'],
+  issues:['Issues & resolutions','Give each issue an owner and a clear path to resolution.','△'],
   meetings:['Meetings & actions','Decisions, owners, deadlines and follow-up.','☷'],
-  reports:['Monthly reports','Attendance records, ready for your monthly review.','▤'],
+  reports:['Attendance reports','Monthly records for review and export.','▤'],
   checkin:['My attendance','Check in, get to work, and make today count.','◎']
 };
 async function navigate(view) {
@@ -478,7 +481,7 @@ async function showApp() {
   $('today-label').textContent=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:zone}).format(new Date());
   $('day-filter').value=today; $('month-filter').value=today.slice(0,7); $('plan-date').value=today;
   const groups=user.admin?[
-    ['Workspace',['home','reminders']],['Sales & customers',['customers','quotations','machines']],
+    ['Workspace',['home','reminders']],['Customer operations',['customers','quotations','machines']],
     ['Operations',['planning','jobs','job-files','production','inventory','purchasing','maintenance']],
     ['People & collaboration',['overview','employees','work','issues','meetings']],
     ['Insights',['analytics','reports','ecosystem']]
@@ -488,7 +491,7 @@ async function showApp() {
   $('add-meeting').hidden=!user.admin;
   $('add-plan').hidden=!user.admin;
   $('add-job').hidden=!user.admin;
-  const shortNames={home:'Overview',overview:'Attendance',ecosystem:'Company memory',analytics:'Management summary'};
+  const shortNames={home:'Dashboard',overview:'Attendance',ecosystem:'Operations library',analytics:'Business overview',employees:'Employees',customers:'Customers',machines:'Customer equipment',inventory:'Inventory',maintenance:'Maintenance',planning:'Work planner'};
   $('navigation').innerHTML=groups.map(([title,list])=>`<section class="nav-group"><h2>${title}</h2>${list.map(view=>`<button class="nav-button" data-view="${view}"><span class="nav-icon" aria-hidden="true">${moduleIcon(view)}</span><span>${shortNames[view]||views[view][0]}</span></button>`).join('')}</section>`).join('');
   $('module-search').value='';$('nav-no-results').hidden=true;
   await navigate(names[0]);
@@ -506,6 +509,18 @@ $('login-form').addEventListener('submit',e=>{e.preventDefault();perform(async()
   try {const data=await api('/api/login','POST',Object.fromEntries(new FormData($('login-form'))));csrf=data.csrf;user=data.user;$('login-form').reset();await showApp();}finally{button.disabled=false;}
 });});
 $('logout').addEventListener('click',()=>perform(async()=>{await api('/api/logout','POST',{});stopCamera();await boot();}));
+function renderCommandResults(){
+  const term=$('command-query').value.trim().toLowerCase();
+  const permitted=[...document.querySelectorAll('#navigation [data-view]')].map(b=>b.dataset.view);
+  const matches=permitted.filter(view=>(views[view][0]+' '+views[view][1]+' '+view).toLowerCase().includes(term));
+  $('command-results').innerHTML=matches.length?matches.map(view=>`<button class="command-result" data-command-view="${view}"><span class="nav-icon" aria-hidden="true">${moduleIcon(view)}</span><span><strong>${escapeHTML(views[view][0])}</strong><small>${escapeHTML(views[view][1])}</small></span><span aria-hidden="true">↗</span></button>`).join(''):'<p class="help">No matching workspace. Try “planning”, “customer” or “inventory”.</p>';
+}
+function openCommand(){if(!user)return;$('command-query').value='';renderCommandResults();$('command-dialog').showModal();$('command-query').focus();}
+$('open-command').addEventListener('click',openCommand);
+$('command-query').addEventListener('input',renderCommandResults);
+$('command-query').addEventListener('keydown',e=>{if(e.key==='Enter'){const first=$('command-results').querySelector('button');if(first){e.preventDefault();first.click();}}});
+$('command-results').addEventListener('click',e=>{const button=e.target.closest('[data-command-view]');if(button){$('command-dialog').close();perform(()=>navigate(button.dataset.commandView));}});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&user){e.preventDefault();if(!$('command-dialog').open&&!document.querySelector('dialog[open]'))openCommand();}});
 $('navigation').addEventListener('click',e=>{const button=e.target.closest('[data-view]');if(button)perform(()=>navigate(button.dataset.view));});
 $('open-navigation').addEventListener('click',()=>{document.body.classList.add('navigation-open');$('navigation-backdrop').hidden=false;$('open-navigation').setAttribute('aria-expanded','true');$('close-navigation').focus();});
 $('close-navigation').addEventListener('click',()=>{closeNavigation();$('open-navigation').focus();});
@@ -571,22 +586,35 @@ $('dispatch-form').addEventListener('submit',e=>{e.preventDefault();perform(asyn
 $('add-machine').addEventListener('click',()=>perform(()=>openMachineDialog()));
 $('add-job').addEventListener('click',()=>perform(()=>openJobDialog()));
 $('customer-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id;delete d.customer_id;await api(id?'/api/customers/'+id:'/api/customers',id?'PATCH':'POST',d);$('customer-dialog').close();await refreshCustomers();if(id)await showCustomerDetail(id);notice('Customer saved.');});});
-$('contact-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id,contactId=d.contact_id;delete d.customer_id;delete d.contact_id;d.primary_contact=e.currentTarget.elements.primary_contact.checked;await api('/api/customers/'+id+'/contacts'+(contactId?'/'+contactId:''),contactId?'PATCH':'POST',d);$('contact-dialog').close();await showCustomerDetail(id);notice('Customer contact saved.');});});
+$('contact-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget)),id=d.customer_id,contactId=d.contact_id;delete d.customer_id;delete d.contact_id;d.primary_contact=e.currentTarget.elements.primary_contact.checked;await api('/api/customers/'+id+'/contacts'+(contactId?'/'+contactId:''),contactId?'PATCH':'POST',d);$('contact-dialog').close();await showCustomerDetail(id);notice('Contact details saved.');});});
 $('machine-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{await api('/api/machines','POST',Object.fromEntries(new FormData(e.currentTarget)));$('machine-dialog').close();machines=[];await refreshMachines();notice('Machine created.');});});
 $('job-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{const d=Object.fromEntries(new FormData(e.currentTarget));d.assigned_employee_ids=d.assigned_employee_id?[Number(d.assigned_employee_id)]:[];delete d.assigned_employee_id;await api('/api/work-orders','POST',d);$('job-dialog').close();jobs=[];await refreshJobs();notice('Work order created.');});});
+$('plan-today').addEventListener('click',()=>{$('plan-date').value=today;perform(refreshPlanning);});
+$('plan-tomorrow').addEventListener('click',()=>{const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+1);$('plan-date').value=d.toISOString().slice(0,10);perform(refreshPlanning);});
+$('plan-form').addEventListener('input',()=>{$('plan-assignment-preview').textContent='Plan details changed. Preview again to check the latest workload.';$('plan-assignment-preview').className='assignment-preview';});
+$('preview-assignment').addEventListener('click',()=>perform(async()=>{
+  const form=$('plan-form'),button=$('preview-assignment'),data=Object.fromEntries(new FormData(form));
+  for(const name of ['date','estimated_hours','daily_capacity'])if(!form.elements[name].reportValidity())return;
+  button.disabled=true;
+  try{
+    const query=new URLSearchParams({date:data.date,department:data.department,estimated_hours:data.estimated_hours,daily_capacity:data.daily_capacity});
+    const result=await api('/api/planning/workload?'+query.toString());
+    const employee=result.employees.find(e=>e.id===Number(data.employee_id||result.recommended_employee_id));
+    const target=$('plan-assignment-preview');target.className='assignment-preview'+(!employee||!employee.fits?' warning':'');
+    target.innerHTML=employee?`<strong>${data.employee_id?'Selected employee':'Suggested assignment'} · ${escapeHTML(employee.name)}</strong>${employee.planned_hours.toFixed(1)} h already planned + ${result.estimated_hours.toFixed(1)} h for this task = ${(employee.planned_hours+result.estimated_hours).toFixed(1)} h.<small>${employee.fits?'Within the '+result.daily_capacity+'-hour planning limit.':'Above the planning limit. A manual assignment will override it.'}</small>`:'<strong>No employee fits this plan yet</strong>Try another date, reduce the task duration, or review the daily planning limit.';
+  }finally{button.disabled=false;}
+}));
 $('plan-date').addEventListener('change',()=>perform(refreshPlanning));
 $('add-plan').addEventListener('click',()=>perform(openPlanDialog));
 $('plan-department').addEventListener('change',e=>{
   const selected=e.target.value;
-  $('plan-employee').innerHTML='<option value="">Assign automatically by planned hours</option>'+team.filter(x=>x.active&&(!selected||x.department===selected)).map(x=>`<option value="${x.id}">${escapeHTML(x.name)} · ${escapeHTML(x.department)}</option>`).join('');
+  $('plan-employee').innerHTML='<option value="">Automatic · balance planned hours</option>'+team.filter(x=>x.active&&(!selected||x.department===selected)).map(x=>`<option value="${x.id}">${escapeHTML(x.name)} · ${escapeHTML(x.department)}</option>`).join('');
 });
-$('plan-form').addEventListener('submit',e=>{e.preventDefault();perform(async()=>{
-  const data=Object.fromEntries(new FormData(e.currentTarget));
+$('plan-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target,button=form.querySelector('button[type="submit"]');if(button.disabled)return;const data=Object.fromEntries(new FormData(form));button.disabled=true;perform(async()=>{try{
   const row=await api('/api/daily-plans','POST',data);
-  $('plan-dialog').close();$('plan-date').value=row.date;await refreshPlanning();
-  notice('Assigned to '+row.employee+'. Review their availability and skills.');
-});});
-$('plan-table').addEventListener('change',e=>{const input=e.target.closest('[data-plan-status]');if(!input||!input.value)return;perform(async()=>{await api('/api/daily-plans/'+input.dataset.planStatus,'PATCH',{status:input.value});await refreshPlanning();notice('Plan status updated.');});});
+  $('plan-dialog').close();$('plan-date').value=row.date;await refreshPlanning();notice('Assigned to '+row.employee+'. Work plan saved.');
+}finally{button.disabled=false;}});});
+$('plan-table').addEventListener('change',e=>{const input=e.target.closest('[data-plan-status]');if(!input||!input.value)return;perform(async()=>{await api('/api/daily-plans/'+input.dataset.planStatus,'PATCH',{status:input.value});await refreshPlanning();notice('Task progress updated.');});});
 $('job-customer').addEventListener('change',e=>perform(()=>loadJobMachines(e.target.value)));
 $('customer-table').addEventListener('click',e=>{const b=e.target.closest('[data-customer-open]');if(b)perform(()=>showCustomerDetail(b.dataset.customerOpen));});
 $('customer-detail').addEventListener('click',e=>perform(async()=>{

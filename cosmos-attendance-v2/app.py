@@ -1309,6 +1309,43 @@ def list_daily_plans():
         return jsonify([daily_plan_json(db,row) for row in db.scalars(q)])
 
 
+def planning_limit(value, label='daily planning limit'):
+    try: result=Decimal(str(value))
+    except (InvalidOperation,TypeError): abort(400,f'Enter a valid {label}.')
+    if not result.is_finite() or result<=0 or result>24: abort(400,f'The {label} must be greater than zero and no more than 24 hours.')
+    return result
+
+
+def planning_workload(db,date,department=None,lock=False):
+    query=select(Employee).where(Employee.active==True,Employee.admin==False).order_by(Employee.name,Employee.id)
+    if lock: query=query.with_for_update()
+    candidates=db.scalars(query).all()
+    if department: candidates=[e for e in candidates if e.department.casefold()==department.casefold()]
+    loads={e.id:Decimal('0') for e in candidates}
+    for eid,hours in db.execute(select(DailyPlan.employee_id,func.sum(DailyPlan.estimated_hours)).where(
+            DailyPlan.work_date==date,DailyPlan.status!='Cancelled').group_by(DailyPlan.employee_id)):
+        if eid in loads: loads[eid]=hours
+    return candidates,loads
+
+
+@app.get('/api/planning/workload')
+@login_required(admin=True)
+def get_planning_workload():
+    date=valid_iso_date(request.args.get('date'),'planning date')
+    capacity=planning_limit(request.args.get('daily_capacity',8))
+    hours=planning_limit(request.args.get('estimated_hours',1),'task duration')
+    department=str(request.args.get('department') or '').strip()[:40]
+    with DB() as db:
+        candidates,loads=planning_workload(db,date,department)
+        available=[e for e in candidates if loads[e.id]+hours<=capacity]
+        recommended=min(available,key=lambda e:(loads[e.id],e.name,e.id)) if available else None
+        return dict(date=date,daily_capacity=float(capacity),estimated_hours=float(hours),
+                    recommended_employee_id=recommended.id if recommended else None,
+                    employees=[dict(id=e.id,name=e.name,department=e.department,planned_hours=float(loads[e.id]),
+                                    remaining_hours=float(max(Decimal('0'),capacity-loads[e.id])),
+                                    fits=loads[e.id]+hours<=capacity) for e in candidates])
+
+
 @app.post('/api/daily-plans')
 @login_required(admin=True)
 def create_daily_plan():
@@ -1334,16 +1371,13 @@ def create_daily_plan():
             employee=db.get(Employee,employee_id)
             if not employee or not employee.active or employee.admin: abort(400,'Choose an active employee.')
         else:
-            candidates=db.scalars(select(Employee).where(Employee.active==True,Employee.admin==False)
-                                  .order_by(Employee.name)).all()
-            if department:
-                candidates=[e for e in candidates if e.department.casefold()==department.casefold()]
+            candidates,load=planning_workload(db,date,department,lock=True)
             if not candidates: abort(400,'No active employee is available in this department.')
-            load={e.id:0.0 for e in candidates}
-            for task in db.scalars(select(DailyPlan).where(DailyPlan.work_date==date,
-                                                          DailyPlan.status!='Cancelled')):
-                if task.employee_id in load: load[task.employee_id]+=float(task.estimated_hours)
-            employee_id=min(candidates,key=lambda e:(load[e.id],e.name)).id
+            if data.get('daily_capacity') is not None:
+                capacity=planning_limit(data['daily_capacity'])
+                candidates=[e for e in candidates if load[e.id]+hours<=capacity]
+                if not candidates: abort(409,'This task exceeds the remaining daily capacity. Choose another date, adjust the limit, or assign an employee manually after review.')
+            employee_id=min(candidates,key=lambda e:(load[e.id],e.name,e.id)).id
         row=DailyPlan(work_date=date,title=title,details=str(data.get('details') or '').strip()[:5000] or None,
                       department=department,employee_id=employee_id,work_order_id=order_id,
                       estimated_hours=hours,priority=priority,status='Planned',created_at=now())
