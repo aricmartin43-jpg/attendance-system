@@ -46,6 +46,11 @@ def initialise():
             db.add(Employee(code=admin_code, name='Cosmos Admin',
                             department='Administration', admin=True, active=True,
                             password=generate_password_hash(admin_pin)))
+    if os.getenv('APP_ENV', 'production') == 'production':
+        from inventory_spares_20260930 import register
+        with DB.begin() as db:
+            result = register(db)
+        print(f'Service spare catalogue: {result}', flush=True)
 
 if __name__ == '__main__':
     initialise()
