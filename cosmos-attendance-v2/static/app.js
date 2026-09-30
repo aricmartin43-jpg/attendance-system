@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 let csrf = '', user = null, team = [], customers = [], machines = [], jobs = [], today = '', zone = 'Asia/Kolkata', currentView = '', openShift = null;
 let stream = null, cameraMode = null, challenge = '', toastTimer, cameraRun = 0;
+let attendanceBusy = false, attendanceComplete = false;
 const escapeHTML = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function donutChart(parts,centreLabel){
   const values=parts.map(p=>({...p,value:Math.max(0,Number(p.value)||0)}));
@@ -141,8 +142,8 @@ async function refreshMine() {
   $('greeting').textContent = 'Hello, ' + user.name.split(' ')[0] + '.';
   const finished = rows.some(r => r.check_out);
   $('employee-status').textContent = openShift ? 'Checked in at ' + time(openShift.check_in) + ' · ' + openShift.date : finished ? 'Your attendance is complete for today.' : 'Ready for a new working day.';
-  $('start-attendance').textContent = openShift ? 'Check out with GPS' : 'Check in with GPS';
-  $('start-attendance').disabled = !openShift && finished;
+  attendanceComplete = !openShift && finished;
+  setAttendanceBusy(attendanceBusy);
   attendanceTable('my-table', rows);
 }
 
@@ -711,22 +712,56 @@ async function startCamera(mode){
     $('camera-status').textContent='Camera ready. Keep your face inside the guide.';$('capture-button').textContent=mode.employee?'Capture and register':'Capture and verify';$('capture-button').disabled=false;
   }catch(e){$('camera-status').textContent=e.name==='NotAllowedError'?'Camera permission denied. Allow camera access in your browser settings.':e.message;stopCamera();}
 }
-$('start-attendance').addEventListener('click',()=>perform(async()=>{
-  await refreshMine();
-  if($('start-attendance').disabled)return;
-  const action=openShift?'out':'in', button=$('start-attendance');
-  button.disabled=true;
-  try{
-    const location=await getLocation();
-    await api('/api/attendance','POST',{location,action});
-    await refreshMine();
-    notice(action==='in'?'Checked in successfully.':'Checked out successfully.');
-  }finally{button.disabled=false;}
-}));
-function getLocation(){return new Promise((resolve,reject)=>{
-  if(!navigator.geolocation)return reject(new Error('Location is not supported by this browser.'));
-  navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,timestamp:p.timestamp}),()=>reject(new Error('Unable to get location. Allow location access, enable GPS, and try again.')),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
-});}
+function setAttendanceBusy(busy, label) {
+  attendanceBusy=busy;
+  $('start-attendance').disabled=busy||attendanceComplete;
+  $('test-location').disabled=busy;
+  $('start-attendance').textContent=label||(busy?'Please wait…':attendanceComplete?'Attendance complete':openShift?'Check out':'Check in');
+}
+function locationStatus(message, error=false) {
+  $('attendance-location-status').textContent=message;
+  $('attendance-location-status').classList.toggle('location-error',error);
+  if(error)$('attendance-location-help').open=true;
+}
+$('start-attendance').addEventListener('click',()=>{
+  if(attendanceBusy||$('start-attendance').disabled)return;
+  const employeeId=user?.id;
+  setAttendanceBusy(true,'Checking attendance…');
+  perform(async()=>{
+    let submitted=false,saved=false;
+    try {
+      await refreshMine();
+      if(attendanceComplete)return;
+      const action=openShift?'out':'in';
+      setAttendanceBusy(true,'Getting location…');
+      const location=await getLocation(message=>locationStatus(message));
+      if(user?.id!==employeeId)throw new Error('The signed-in account changed. Sign in with your employee ID and try again.');
+      setAttendanceBusy(true,'Saving attendance…');
+      locationStatus('Location received. Saving your '+(action==='in'?'check-in':'check-out')+'…');
+      submitted=true;
+      await api('/api/attendance','POST',{location,action});
+      saved=true;
+      await refreshMine();
+      const message=(action==='in'?'Check-in':'Check-out')+' saved. Location accuracy: ±'+Math.round(location.accuracy)+' m.';
+      locationStatus(message);notice(message);
+    } catch(error) {
+      const prefix=saved?'Attendance was saved. Reload to update this page. ':submitted?'Could not confirm attendance. Refresh your attendance to check before retrying. ':'Attendance was not submitted. ';
+      locationStatus(prefix+error.message,true);notice(error.message,true);
+    } finally {setAttendanceBusy(false);}
+  });
+});
+$('test-location').addEventListener('click',()=>{
+  if(attendanceBusy)return;
+  setAttendanceBusy(true);
+  perform(async()=>{
+    try {
+      const location=await getLocation(message=>locationStatus(message));
+      locationStatus('Location is available (±'+Math.round(location.accuracy)+' m). No attendance was recorded.');
+    } catch(error) {locationStatus(error.message,true);notice(error.message,true);}
+    finally {setAttendanceBusy(false);}
+  });
+});
+function getLocation(onProgress){return CosmosLocation.getLocation(onProgress);}
 $('capture-button').addEventListener('click',()=>perform(async()=>{
   const mode=cameraMode,run=cameraRun,button=$('capture-button');
   if(mode.employee&&!$('consent').checked)throw new Error('Confirm employee consent before registering their face.');

@@ -7,8 +7,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/static/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/workspace.css?v=cosmos-operations-4">
-  <script src="/static/app.js?v=cosmos-operations-4" defer></script>
+  <link rel="stylesheet" href="/static/workspace.css?v=cosmos-location-5">
+  <script src="/static/location.js?v=cosmos-location-5" defer></script>
+  <script src="/static/app.js?v=cosmos-location-5" defer></script>
 </head>
 <body>
   <div id="login-view" class="login-layout">
@@ -19,7 +20,7 @@
     </aside>
     <main class="login-main"><div class="login-card"><span class="eyebrow accent">YOUR COSMOS WORKSPACE</span><h2>Welcome to Cosmos</h2><p class="muted">Sign in to your Cosmos Employee Portal.</p>
       <form id="login-form"><label>Employee ID<input id="login-code" name="code" autocomplete="username" required placeholder="e.g. CES001"></label><label>4-digit PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="current-password" required placeholder="Enter your PIN"></label><button type="submit" class="primary wide">Sign in <span aria-hidden="true">→</span></button></form>
-      <p class="help">Use your assigned employee ID and 4-digit PIN.</p><div class="login-note"><span class="mini-icon">◎</span><p>Need help signing in? Contact your administrator.</p></div>
+      <p class="help">Use your assigned employee ID and 4-digit PIN. Location is only required when marking attendance.</p><div class="login-note"><span class="mini-icon">◎</span><p>Need help signing in? Contact your administrator.</p></div>
     </div></main>
   </div>
 
@@ -63,7 +64,7 @@
 
       <section id="reports-panel" class="panel-view" hidden><div class="section-card"><div class="section-heading"><div><h2>Monthly attendance</h2><p class="muted">Download a CSV for Excel or Google Sheets.</p></div><div class="report-controls"><label class="compact-label">Month<input type="month" id="month-filter"></label><button class="primary" id="export">↓ Export CSV</button></div></div><div id="monthly-table"></div></div><p class="help">Hours include the full time between check-in and check-out. Break deductions and payroll calculations are not included.</p></section>
 
-      <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Mark attendance with GPS</button><div class="steps"><span>01 · Login</span><span>02 · GPS</span><span>03 · Record</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A simple secure check-in.</h2><ol><li><strong>Sign in securely</strong><p>Use your employee ID and 4-digit PIN.</p></li><li><strong>Allow location access</strong><p>GPS is captured only when you check in or check out.</p></li><li><strong>Confirm attendance</strong><p>Your signed-in employee account and current GPS location are recorded.</p></li></ol><p class="help">Face recognition is disabled. No attendance photo is required.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
+      <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Check in</button><div class="attendance-location-box"><p id="attendance-location-status" role="status" aria-live="polite">Location is requested when you mark attendance.</p><button type="button" class="secondary wide" id="test-location">Check location without marking attendance</button><details id="attendance-location-help"><summary>Help with location access</summary><ol><li>Open this portal directly in Chrome or Safari. If you opened a link inside WhatsApp or another app, use its menu to open the link in your browser.</li><li>Turn on Location Services in your phone settings. Allow your browser to use location while you are using it, with precise location enabled where available.</li><li>In the browser’s settings for this website, set Location to Allow. Reload the page after changing permission.</li><li>Keep Wi-Fi or mobile data on. If the signal is weak inside the factory, try near a window or outdoors. Set the phone date and time to automatic.</li></ol><p>Use “Check location” to test permission and signal. This does not record a check-in or check-out. If it still fails, send the displayed error to your administrator.</p></details></div><div class="steps"><span>01 · Login</span><span>02 · GPS</span><span>03 · Record</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A simple secure check-in.</h2><ol><li><strong>Sign in securely</strong><p>Use your employee ID and 4-digit PIN.</p></li><li><strong>Allow location access</strong><p>GPS is captured only when you check in or check out.</p></li><li><strong>Confirm attendance</strong><p>Your signed-in employee account and current GPS location are recorded.</p></li></ol><p class="help">Face recognition is disabled. No attendance photo is required.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
 
       <section id="ecosystem-panel" class="panel-view" hidden>
         <div class="stats">

@@ -676,8 +676,24 @@ def current_session():
                     timezone=str(LOCAL), today=now().astimezone(LOCAL).date().isoformat())
 
 
+def login_attempt_key():
+    data=request.get_json(silent=True)
+    code=str(data.get('code','') if isinstance(data,dict) else '').strip().lower()
+    return 'login-account:'+hashlib.sha256(code.encode()).hexdigest()
+
+
+def attendance_attempt_key():
+    # Signed sessions separate employees who share the factory's public IP address.
+    return 'attendance-account:'+str(session['uid']) if session.get('uid') else 'attendance-ip:'+get_remote_address()
+
+
 @app.post('/api/login')
-@limiter.limit('5 per minute; 30 per hour')
+@limiter.limit('5 per minute; 30 per hour', key_func=login_attempt_key,
+               deduct_when=lambda response: response.status_code==401,
+               error_message='Too many incorrect PIN attempts for this employee ID. Wait a minute before retrying. If it continues, ask your administrator for help.')
+@limiter.limit('60 per minute; 300 per hour', key_func=get_remote_address,
+               deduct_when=lambda response: response.status_code==401,
+               error_message='Too many incorrect sign-in attempts from this network. Please wait before retrying.')
 def login():
     data = request.get_json() or {}
     code = str(data.get('code', '')).strip().lower()
@@ -869,20 +885,26 @@ def enrol(employee_id):
 
 def gps(data):
     try:
+        if not isinstance(data,dict):raise ValueError()
         lat, lng, accuracy = float(data['lat']), float(data['lng']), float(data['accuracy'])
         age = abs(now().timestamp() * 1000 - float(data['timestamp']))
         if not all(math.isfinite(x) for x in (lat, lng, accuracy, age)):
             raise ValueError()
-        if not (-90 <= lat <= 90 and -180 <= lng <= 180 and 0 <= accuracy <= 10000 and age <= 120000):
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180 and 0 <= accuracy):
             raise ValueError()
-        return lat, lng, accuracy
     except (KeyError, ValueError, TypeError):
-        abort(400, 'A fresh GPS location is required. Allow location access and try again.')
+        abort(400, 'A valid location was not received. Allow location access on your phone and browser, then try attendance again.')
+    if age>120000:
+        abort(400, 'The location reading is out of date. Set your phone date and time to automatic, then get your location again.')
+    if accuracy>10000:
+        abort(400, 'Your location is too approximate. Enable precise location and try again near a window or outdoors.')
+    return lat, lng, accuracy
 
 
 @app.post('/api/attendance')
 @login_required()
-@limiter.limit('6 per minute')
+@limiter.limit('6 per minute', key_func=attendance_attempt_key,
+               error_message='Too many attendance attempts for your account. Wait a minute, then refresh your attendance before retrying.')
 def mark_attendance():
     data = request.get_json() or {}
     action = data.get('action')
