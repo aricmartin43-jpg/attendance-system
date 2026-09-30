@@ -627,6 +627,23 @@ def csrf():
         token = request.headers.get('X-CSRF-Token', '')
         if not token or not secrets.compare_digest(token, session.get('csrf', '')):
             abort(403, 'Session expired. Refresh the page and try again.')
+        if request.is_json:
+            data = request.get_json()
+            if not isinstance(data, dict):
+                abort(400, 'Send the form fields as a JSON object.')
+            # Record references are positive integer IDs, never booleans or decimals.
+            for key, value in data.items():
+                if key in ('employee_id','customer_id','machine_id','machine_type_id','site_id',
+                           'work_order_id','item_id','supplier_id','asset_id','assigned_id',
+                           'supervisor_id','job_owner_id','approved_by_id'):
+                    optional_id(value, key.replace('_', ' '))
+            if 'assigned_employee_ids' in data:
+                values = data['assigned_employee_ids']
+                if not isinstance(values, list) or len(values) > 30:
+                    abort(400, 'Choose up to 30 employees.')
+                for value in values:
+                    if optional_id(value, 'employee') is None:
+                        abort(400, 'Choose a valid employee.')
 
 
 @app.after_request
@@ -723,7 +740,10 @@ def logout():
 
 
 def clean_text(data, key, limit):
-    value = str(data.get(key, '')).strip()
+    value = data.get(key, '')
+    if not isinstance(value, str):
+        abort(400, f'{key.replace("_", " ").title()} must be text.')
+    value = value.strip()
     if not value or len(value) > limit:
         abort(400, f'{key.replace("_", " ").title()} must be between 1 and {limit} characters.')
     return value
@@ -996,10 +1016,12 @@ def my_status():
 def edit_attendance(attendance_id):
     data=request.get_json() or {}
     with DB.begin() as db:
-        r=db.get(Attendance, attendance_id)
+        r=db.get(Attendance,attendance_id)
         if not r:
             abort(404)
-        e=db.get(Employee, r.employee_id)
+        e=db.scalar(select(Employee).where(Employee.id==r.employee_id).with_for_update())
+        r=db.scalar(select(Attendance).where(Attendance.id==attendance_id).with_for_update().execution_options(populate_existing=True))
+        if not r:abort(404)
         for key, attr in [('check_in','in_at'),('check_out','out_at')]:
             if key in data:
                 value=data.get(key)
@@ -1015,6 +1037,15 @@ def edit_attendance(attendance_id):
                         abort(400, f'Invalid {key.replace("_"," ")} time.')
         if r.out_at and aware(r.out_at) < aware(r.in_at):
             abort(400, 'Check-out cannot be before check-in.')
+        with db.no_autoflush:
+            work_date=aware(r.in_at).astimezone(LOCAL).date().isoformat()
+            if db.scalar(select(Attendance.id).where(Attendance.employee_id==r.employee_id,
+                    Attendance.id!=r.id, Attendance.work_date==work_date)):
+                abort(409, 'This employee already has attendance for that date.')
+            if r.out_at is None and db.scalar(select(Attendance.id).where(
+                    Attendance.employee_id==r.employee_id, Attendance.id!=r.id, Attendance.out_at==None)):
+                abort(409, 'This employee already has another open shift.')
+        r.work_date=work_date
         db.add(AuditLog(admin_id=request.employee.id, action='edit_attendance', target=f'{e.code}:{r.work_date}',
                        detail=json.dumps({'check_in':data.get('check_in'),'check_out':data.get('check_out')}), created_at=now()))
         return record(r,e)
@@ -1047,8 +1078,10 @@ def audit():
 
 def valid_iso_date(value, field='date'):
     try:
-        datetime.strptime(str(value), '%Y-%m-%d')
-        return str(value)
+        if not isinstance(value,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}',value):
+            raise ValueError()
+        datetime.strptime(value, '%Y-%m-%d')
+        return value
     except (ValueError, TypeError):
         abort(400, f'Choose a valid {field}.')
 
@@ -1144,13 +1177,10 @@ def create_work_report():
         if machine_id and not machine:
             abort(404, 'Machine not found.')
         if not request.employee.admin:
-            if work_order_id and not db.scalar(select(WorkOrderAssignment.id).where(
-                    WorkOrderAssignment.work_order_id==work_order_id,
-                    WorkOrderAssignment.employee_id==employee_id).limit(1)):
+            if work_order_id and not db.scalar(select(WorkOrder.id).where(WorkOrder.id==work_order_id,
+                    WorkOrder.id.in_(assigned_order_ids(employee_id))).limit(1)):
                 abort(403, 'You can only link work reports to your assigned work orders.')
-            if machine_id and not db.scalar(select(WorkOrderAssignment.id).join(
-                    WorkOrder, WorkOrder.id==WorkOrderAssignment.work_order_id).where(
-                    WorkOrderAssignment.employee_id==employee_id,
+            if machine_id and not db.scalar(select(WorkOrder.id).where(WorkOrder.id.in_(assigned_order_ids(employee_id)),
                     WorkOrder.machine_id==machine_id).limit(1)):
                 abort(403, 'You can only link work reports to machines assigned to your work.')
         if work_order_id and machine_id and (machine.customer_id!=work_order.customer_id or (work_order.machine_id and work_order.machine_id!=machine_id)):
@@ -1331,11 +1361,22 @@ def service_fields(data, existing=None):
 
 def optional_id(value,label):
     if value in (None,''):return None
-    if isinstance(value,bool):abort(400,'Choose a valid '+label+'.')
-    try: result=int(value)
-    except (ValueError,TypeError):abort(400,'Choose a valid '+label+'.')
-    if result<=0:abort(400,'Choose a valid '+label+'.')
+    if type(value) is not int and not (isinstance(value,str) and re.fullmatch(r'[0-9]+',value)):
+        abort(400,'Choose a valid '+label+'.')
+    result=int(value)
+    if result<=0 or result>2147483647:abort(400,'Choose a valid '+label+'.')
     return result
+
+
+def assigned_order_ids(employee_id):
+    """Explicit assignments and non-cancelled plans both authorize linked work.
+
+    Deriving plan access avoids stale permissions after reassignment or deletion.
+    """
+    return select(WorkOrderAssignment.work_order_id).where(
+        WorkOrderAssignment.employee_id==employee_id).union(
+        select(DailyPlan.work_order_id).where(DailyPlan.employee_id==employee_id,
+            DailyPlan.work_order_id!=None,DailyPlan.status!='Cancelled'))
 
 
 def linked_work_context(db,data):
@@ -1381,13 +1422,27 @@ def machine_json(m, customer=None, machine_type=None):
                 last_service_date=m.last_service_date,next_service_date=m.next_service_date)
 
 
-def work_order_json(db, w):
-    customer=db.get(Customer,w.customer_id)
-    machine=db.get(CustomerMachine,w.machine_id) if w.machine_id else None
-    assignments=db.execute(select(WorkOrderAssignment,Employee).join(Employee,Employee.id==WorkOrderAssignment.employee_id)
+def work_order_context(db, orders):
+    context={'customers':{},'machines':{},'employees':{},'assignments':{}}
+    if not orders:return context
+    context['customers']={c.id:c for c in db.scalars(select(Customer).where(Customer.id.in_({w.customer_id for w in orders})))}
+    machine_ids={w.machine_id for w in orders if w.machine_id}
+    if machine_ids:context['machines']={m.id:m for m in db.scalars(select(CustomerMachine).where(CustomerMachine.id.in_(machine_ids)))}
+    employee_ids={eid for w in orders for eid in (w.job_owner_id,w.supervisor_id,w.approved_by_id) if eid}
+    if employee_ids:context['employees']={e.id:e for e in db.scalars(select(Employee).where(Employee.id.in_(employee_ids)))}
+    for assignment,employee in db.execute(select(WorkOrderAssignment,Employee).join(Employee,Employee.id==WorkOrderAssignment.employee_id)
+            .where(WorkOrderAssignment.work_order_id.in_([w.id for w in orders])).order_by(WorkOrderAssignment.id)):
+        context['assignments'].setdefault(assignment.work_order_id,[]).append((assignment,employee))
+    return context
+
+
+def work_order_json(db, w, context=None):
+    customer=context['customers'].get(w.customer_id) if context is not None else db.get(Customer,w.customer_id)
+    machine=context['machines'].get(w.machine_id) if context is not None else db.get(CustomerMachine,w.machine_id) if w.machine_id else None
+    assignments=context['assignments'].get(w.id,[]) if context is not None else db.execute(select(WorkOrderAssignment,Employee).join(Employee,Employee.id==WorkOrderAssignment.employee_id)
                            .where(WorkOrderAssignment.work_order_id==w.id).order_by(WorkOrderAssignment.id)).all()
     def emp_name(emp_id):
-        e=db.get(Employee,emp_id) if emp_id else None
+        e=context['employees'].get(emp_id) if context is not None else db.get(Employee,emp_id) if emp_id else None
         return dict(id=e.id,name=e.name,code=e.code) if e else None
     return dict(id=w.id, code=w.code, customer_id=w.customer_id, customer=customer.name if customer else None,
                 machine_id=w.machine_id, machine_code=machine.code if machine else None,
@@ -1551,18 +1606,18 @@ def list_customers():
     with DB() as db:
         q=select(Customer).order_by(Customer.name)
         if not request.employee.admin:
-            assigned_orders=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            assigned_orders=assigned_order_ids(request.employee.id)
             customer_ids=select(WorkOrder.customer_id).where(WorkOrder.id.in_(assigned_orders))
             q=q.where(Customer.id.in_(customer_ids))
         rows=db.scalars(q).all()
+        ids=[c.id for c in rows]
+        machine_counts=dict(db.execute(select(CustomerMachine.customer_id,func.count()).where(CustomerMachine.customer_id.in_(ids)).group_by(CustomerMachine.customer_id)).all())
+        contact_counts=dict(db.execute(select(CustomerContact.customer_id,func.count()).where(CustomerContact.customer_id.in_(ids)).group_by(CustomerContact.customer_id)).all())
+        job_counts=dict(db.execute(select(WorkOrder.customer_id,func.count()).where(WorkOrder.customer_id.in_(ids),WorkOrder.status.notin_(TERMINAL_STATUSES)).group_by(WorkOrder.customer_id)).all())
         out=[]
         for c in rows:
-            machines=db.scalars(select(CustomerMachine).where(CustomerMachine.customer_id==c.id)).all()
-            contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id)).all()
-            open_jobs=db.scalars(select(WorkOrder).where(WorkOrder.customer_id==c.id,
-                              WorkOrder.status.notin_(['Completed','Closed','Cancelled']))).all()
             item=customer_json(c)
-            item.update(machine_count=len(machines),contact_count=len(contacts),open_jobs=len(open_jobs))
+            item.update(machine_count=machine_counts.get(c.id,0),contact_count=contact_counts.get(c.id,0),open_jobs=job_counts.get(c.id,0))
             out.append(item)
         return jsonify(out)
 
@@ -1646,8 +1701,8 @@ def customer_detail(customer_id):
         c=db.get(Customer,customer_id)
         if not c: abort(404,'Customer not found.')
         if not request.employee.admin:
-            allowed=db.scalar(select(WorkOrderAssignment.id).join(WorkOrder,WorkOrder.id==WorkOrderAssignment.work_order_id)
-                              .where(WorkOrderAssignment.employee_id==request.employee.id,WorkOrder.customer_id==customer_id).limit(1))
+            allowed=db.scalar(select(WorkOrder.id).where(WorkOrder.id.in_(assigned_order_ids(request.employee.id)),
+                              WorkOrder.customer_id==customer_id).limit(1))
             if not allowed: abort(403,'This customer is not linked to your assigned work.')
         contacts=db.scalars(select(CustomerContact).where(CustomerContact.customer_id==c.id)
                            .order_by(CustomerContact.primary_contact.desc(),CustomerContact.name)).all()
@@ -1744,18 +1799,17 @@ def create_machine_type():
 def list_machines():
     customer_id=request.args.get('customer_id')
     with DB() as db:
-        q=select(CustomerMachine).order_by(CustomerMachine.id.desc())
+        q=select(CustomerMachine,Customer,MachineType).join(Customer,Customer.id==CustomerMachine.customer_id).outerjoin(MachineType,MachineType.id==CustomerMachine.machine_type_id).order_by(CustomerMachine.id.desc())
         if not request.employee.admin:
-            assigned_orders=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            assigned_orders=assigned_order_ids(request.employee.id)
             machine_ids=select(WorkOrder.machine_id).where(WorkOrder.id.in_(assigned_orders),WorkOrder.machine_id != None)
             q=q.where(CustomerMachine.id.in_(machine_ids))
         if customer_id:
             try:q=q.where(CustomerMachine.customer_id==int(customer_id))
             except ValueError:abort(400,'Choose a valid customer.')
         out=[]
-        for m in db.scalars(q.limit(500)):
-            out.append(machine_json(m,db.get(Customer,m.customer_id),
-                       db.get(MachineType,m.machine_type_id) if m.machine_type_id else None))
+        for m,customer,machine_type in db.execute(q.limit(500)):
+            out.append(machine_json(m,customer,machine_type))
         return jsonify(out)
 
 
@@ -1806,8 +1860,8 @@ def machine_history(machine_id):
         m=db.get(CustomerMachine,machine_id)
         if not m: abort(404,'Machine not found.')
         if not request.employee.admin:
-            allowed=db.scalar(select(WorkOrderAssignment.id).join(WorkOrder,WorkOrder.id==WorkOrderAssignment.work_order_id)
-                              .where(WorkOrderAssignment.employee_id==request.employee.id,WorkOrder.machine_id==machine_id).limit(1))
+            allowed=db.scalar(select(WorkOrder.id).where(WorkOrder.id.in_(assigned_order_ids(request.employee.id)),
+                              WorkOrder.machine_id==machine_id).limit(1))
             if not allowed: abort(403,'This machine is not linked to your assigned work.')
         customer=db.get(Customer,m.customer_id)
         jobs=db.scalars(select(WorkOrder).where(WorkOrder.machine_id==m.id).order_by(WorkOrder.id.desc())).all()
@@ -1833,9 +1887,11 @@ def list_work_orders():
     with DB() as db:
         q=select(WorkOrder).order_by(WorkOrder.id.desc())
         if not request.employee.admin:
-            ids=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==request.employee.id)
+            ids=assigned_order_ids(request.employee.id)
             q=q.where(WorkOrder.id.in_(ids))
-        return jsonify([work_order_json(db,w) for w in db.scalars(q.limit(300))])
+        orders=db.scalars(q.limit(300)).all()
+        context=work_order_context(db,orders)
+        return jsonify([work_order_json(db,w,context) for w in orders])
 
 
 @app.post('/api/work-orders')
@@ -1872,13 +1928,13 @@ def create_work_order():
                     status=str(data.get('status','Open')).strip()[:30] or 'Open',
                     priority=str(data.get('priority','Normal')).strip()[:20] or 'Normal',created_at=now())
         db.add(w);db.flush();w.code=f'JO-{now().astimezone(LOCAL).year}-{w.id:04d}'
-        assigned=data.get('assigned_employee_ids') or []
-        for employee in assigned[:30]:
-            try:eid=int(employee)
-            except (TypeError,ValueError):continue
-            if db.get(Employee,eid):
-                db.add(WorkOrderAssignment(work_order_id=w.id,employee_id=eid,role='Assigned',
-                                           responsibility=None,assigned_at=now()))
+        assigned=list(dict.fromkeys(optional_id(value,'employee') for value in (data.get('assigned_employee_ids') or [])))
+        for eid in assigned:
+            employee=db.get(Employee,eid)
+            if not employee or not employee.active or employee.admin:
+                abort(400,'Choose active employees for this work order.')
+            db.add(WorkOrderAssignment(work_order_id=w.id,employee_id=eid,role='Assigned',
+                                       responsibility=None,assigned_at=now()))
         db.add(AuditLog(admin_id=request.employee.id,action='create_work_order',target=w.code,detail=w.title,created_at=now()))
         return work_order_json(db,w),201
 
@@ -2005,13 +2061,19 @@ def reserved_total(db,item_id):
                      .where(MaterialRequirement.item_id==item_id)) or Decimal(0)
 
 
+def reserved_totals(db):
+    return dict(db.execute(select(MaterialRequirement.item_id,func.sum(MaterialRequirement.reserved_qty))
+                           .group_by(MaterialRequirement.item_id)).all())
+
+
 @app.get('/api/stock-items')
 @login_required(admin=True)
 def list_stock_items():
     with DB() as db:
         out=[]
+        reservations=reserved_totals(db)
         for x in db.scalars(select(StockItem).order_by(StockItem.name)):
-            row=stock_json(x);reserved=reserved_total(db,x.id)
+            row=stock_json(x);reserved=reservations.get(x.id,Decimal(0))
             row.update(reserved=str(reserved),available=str(x.quantity-reserved));out.append(row)
         return jsonify(out)
 
@@ -2047,16 +2109,13 @@ def update_stock_item(item_id):
         item=db.get(StockItem,item_id)
         if not item: abort(404,'Item not found.')
         structured=('category','sub_category','size_dimension','material_finish')
-        if any(key in data for key in structured) and all(str(data.get(key) or '').strip() for key in structured):
-            parts=[clean_text(data,key,limit) for key,limit in zip(structured,(50,80,80,80))]
+        if any(key in data for key in structured):
+            merged={key:data.get(key,getattr(item,key)) for key in structured}
+            parts=[clean_text(merged,key,limit) for key,limit in zip(structured,(50,80,80,80))]
             name=' - '.join(parts)
             if len(name)>180: abort(400,'Combined item name must be 180 characters or fewer.')
             item.category,item.sub_category,item.size_dimension,item.material_finish=parts
             item.name=name
-        elif any(key in data for key in ('sub_category','size_dimension','material_finish')) and any(str(data.get(key) or '').strip() for key in structured[1:]):
-            abort(400,'Complete all four naming fields.')
-        elif 'category' in data:
-            item.category=clean_text(data,'category',50)
         for key,limit in {'specification':5000,'unit':20,'location':100}.items():
             if key in data:
                 value=str(data[key] or '').strip()[:limit]
@@ -2348,7 +2407,7 @@ def employee_monthly_profile(employee_id):
         reports=db.scalars(select(WorkReport).where(WorkReport.employee_id==employee_id,
                            WorkReport.work_date>=start,WorkReport.work_date<end)
                            .order_by(WorkReport.work_date.desc(),WorkReport.id.desc())).all()
-        assigned_ids=select(WorkOrderAssignment.work_order_id).where(WorkOrderAssignment.employee_id==employee_id)
+        assigned_ids=assigned_order_ids(employee_id)
         completed_jobs=db.scalars(select(WorkOrder).where(WorkOrder.id.in_(assigned_ids),
                                  WorkOrder.status.in_(['Completed','Closed']),
                                  WorkOrder.completed_date>=start,WorkOrder.completed_date<end)).all()
@@ -2396,6 +2455,8 @@ def update_employee_file(employee_id):
         if not p: p=EmployeeProfile(employee_id=employee_id);db.add(p)
         for key,limit in {'designation':100,'joining_date':10,'skills':5000,'notes':5000}.items():
             if key in data: setattr(p,key,str(data[key] or '').strip()[:limit] or None)
+        if 'joining_date' in data:
+            p.joining_date=valid_iso_date(data['joining_date'],'joining date') if data['joining_date'] else None
         if 'supervisor_id' in data:
             try: sid=int(data['supervisor_id']) if data['supervisor_id'] else None
             except (TypeError,ValueError): abort(400,'Invalid supervisor.')
@@ -2583,11 +2644,11 @@ def deadline_reminders():
             add('Quotation promised date',r,r.promised_date,r.code+' · '+r.title,'quotations')
         for r in db.scalars(select(MeetingAction).where(MeetingAction.status.notin_(['Completed','Closed','Cancelled','Done']))):add('Meeting action',r,r.due_date,r.action,'meetings')
         for r in db.scalars(select(DeadlineReminder).where(DeadlineReminder.completed==False)):add('Custom',r,r.due_date,r.title,'reminders')
-        for r in db.scalars(select(CustomerMachine).where(CustomerMachine.status!='Out of service')):
-            company=db.get(Customer,r.customer_id)
+        for r,company in db.execute(select(CustomerMachine,Customer).join(Customer,Customer.id==CustomerMachine.customer_id).where(CustomerMachine.status!='Out of service',CustomerMachine.next_service_date!=None)):
             add('Machine service',r,r.next_service_date,f'{company.name} · {r.customer_machine_no or r.model or r.code}','machines')
+        reservations=reserved_totals(db)
         for item in db.scalars(select(StockItem).where(StockItem.active==True)):
-            available=item.quantity-reserved_total(db,item.id)
+            available=item.quantity-reservations.get(item.id,Decimal(0))
             if available<=item.reorder_level:
                 rows.append(dict(key=f'Low stock:{item.id}',id=item.id,kind='Low stock',title=item.sku+' · '+item.name,
                                  due_date=None,days=None,view='inventory',urgency='Low stock',
@@ -2620,12 +2681,13 @@ def management_summary():
         items=db.scalars(select(StockItem).where(StockItem.active==True)).all()
         tasks=db.scalars(select(MaintenanceTask)).all()
         today=now().astimezone(LOCAL).date().isoformat()
+        reservations=reserved_totals(db)
         return dict(open_jobs=sum(j.status not in ('Completed','Closed','Cancelled') for j in jobs),
                     overdue_jobs=sum(j.target_date is not None and j.target_date<today and j.status not in ('Completed','Closed','Cancelled') for j in jobs),
                     blocked_steps=sum(s.status=='Blocked' for s in steps),
                     accepted_quantity=str(sum((s.accepted_qty for s in steps),Decimal(0))),
                     rejected_quantity=str(sum((s.rejected_qty for s in steps),Decimal(0))),
-                    low_stock=sum(i.quantity-reserved_total(db,i.id)<=i.reorder_level for i in items),
+                    low_stock=sum(i.quantity-reservations.get(i.id,Decimal(0))<=i.reorder_level for i in items),
                     open_maintenance=sum(t.status not in TERMINAL_STATUSES for t in tasks))
 
 

@@ -48,13 +48,11 @@ def post(c, path, data):
 def employee(admin, code='ces001', name='Test Employee'):
     r = post(admin, '/api/employees', dict(code=code, name=name, department='Production', pin='1234'))
     assert r.status_code == 201
-    assert post(admin, f'/api/employees/{r.json["id"]}/enrol', dict(photo='fake', consent=True)).status_code == 200
     return client(code, '1234'), r.json['id']
 
 
 def attendance(c, action='in', **overrides):
-    challenge = post(c, '/api/capture', {}).json['challenge']
-    data = dict(action=action, challenge=challenge, photo='fake', location=dict(lat=11.01,lng=76.96,accuracy=12,timestamp=module.now().timestamp()*1000))
+    data = dict(action=action, location=dict(lat=11.01,lng=76.96,accuracy=12,timestamp=module.now().timestamp()*1000))
     data.update(overrides)
     return post(c, '/api/attendance', data)
 
@@ -137,7 +135,7 @@ def test_quote_to_job_material_reservation_and_drawing_approval():
     assert accepted.status_code==201
     job_id=accepted.json['work_order']['id']
     assert post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'DUP'}).status_code==409
-    item=post(admin,'/api/stock-items',{'sku':'CR-SHEET','name':'CR sheet','unit':'kg'}).json
+    item=post(admin,'/api/stock-items',{'sku':'CR-SHEET','category':'Raw material','sub_category':'Sheet','size_dimension':'2 mm','material_finish':'CR','unit':'kg'}).json
     assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Receive','quantity':'10','reason':'Initial stock'}).status_code==201
     req=post(admin,f'/api/work-orders/{job_id}/materials',{'item_id':item['id'],'required_qty':'8'}).json
     assert post(admin,f'/api/job-materials/{req["id"]}/reserve',{'quantity':'8'}).status_code==200
@@ -188,21 +186,20 @@ def test_shift_rules_and_record_isolation():
     assert 'in_photo' not in row and 'encoding' not in row
 
 
-def test_face_mismatch_and_gps_validation(monkeypatch):
+def test_gps_validation_is_required_without_face_enrolment():
     worker, _ = employee(client())
     for location in ({}, dict(lat=float('nan'),lng=10,accuracy=1,timestamp=1), dict(lat=11,lng=76,accuracy=10,timestamp=1)):
         assert attendance(worker, location=location).status_code == 400
-    monkeypatch.setattr(module, 'face_image', lambda value:(np.ones(128),b'photo'))
-    assert attendance(worker).status_code == 403
     assert worker.get('/api/attendance').json == []
+    assert attendance(worker).status_code == 201
 
 
-def test_failed_storage_does_not_create_attendance(monkeypatch):
+def test_photo_storage_outage_does_not_block_pin_gps_attendance(monkeypatch):
     worker, _ = employee(client())
     def failed(_): raise RuntimeError('Simulated Cloudinary outage')
     monkeypatch.setattr(module, 'upload_photo', failed)
-    assert attendance(worker).status_code == 503
-    assert worker.get('/api/attendance').json == []
+    assert attendance(worker).status_code == 201
+    assert len(worker.get('/api/attendance').json) == 1
 
 
 def test_overnight_checkout(monkeypatch):
@@ -227,14 +224,12 @@ def test_export_formula_safety_and_dates():
     assert admin.get('/api/export?month=2026-99').status_code == 400
 
 
-def test_consent_deactivation_and_encrypted_templates():
+def test_disabled_face_enrolment_and_employee_deactivation():
     admin = client()
     worker, eid = employee(admin)
-    assert post(admin, f'/api/employees/{eid}/enrol',dict(photo='fake',consent=False)).status_code == 400
+    assert post(admin, f'/api/employees/{eid}/enrol',dict(photo='fake',consent=False)).status_code == 410
     with module.DB() as db:
-        encrypted = db.get(module.Employee,eid).encoding
-        assert not encrypted.startswith('[')
-        assert len(json.loads(module.CIPHER.decrypt(encrypted.encode()))) == 128
+        assert db.get(module.Employee,eid).encoding is None
     assert attendance(worker).status_code == 201
     assert post(admin, f'/api/employees/{eid}/active',dict(active=False)).status_code == 409
     assert attendance(worker,'out').status_code == 201
@@ -242,13 +237,15 @@ def test_consent_deactivation_and_encrypted_templates():
     assert worker.get('/api/attendance').status_code == 401
 
 
-def test_successful_challenge_cannot_be_replayed():
+def test_signed_out_session_cannot_submit_attendance():
     worker, _ = employee(client())
-    challenge = post(worker,'/api/capture',{}).json['challenge']
-    data=dict(action='in',challenge=challenge,photo='fake',location=dict(lat=11,lng=76,accuracy=2,timestamp=module.now().timestamp()*1000))
-    assert post(worker,'/api/attendance',data).status_code == 201
-    data['action']='out'
-    assert post(worker,'/api/attendance',data).status_code == 400
+    assert post(worker, '/api/logout', {}).status_code == 200
+    assert attendance(worker).status_code == 403
+    token = worker.get('/api/session').json['csrf']
+    worker.csrf = token
+    assert attendance(worker).status_code == 401
+    with module.DB() as db:
+        assert db.scalar(module.select(module.func.count()).select_from(module.Attendance)) == 0
 
 
 def test_pages_and_security_headers():
@@ -313,7 +310,7 @@ def test_employee_points_ledger_validation_permissions_and_corrections():
     assert len(result['entries']) == 2
     voided = next(r for r in result['entries'] if r['id'] == deducted.json['id'])
     assert voided['voided_at'] and voided['voided_by'] and voided['recorded_by']
-    assert admin.delete(f'/api/employees/{eid}', headers={'X-CSRF-Token':admin.csrf}).status_code == 409
+    assert admin.delete(f'/api/employees/{eid}', headers={'X-CSRF-Token':admin.csrf}).status_code == 400
     with module.DB() as db:
         assert len(db.scalars(module.select(module.AuditLog).where(module.AuditLog.action.like('employee_points_%'))).all()) == 4
 
@@ -354,7 +351,7 @@ def test_policy_memos_half_points_rules_thresholds_and_exceptions_review():
     result=admin.get(path).json
     assert result['total']==19.5 and result['threshold']==16
     assert any(r['voided_at'] for r in result['entries'])
-    assert admin.delete(f'/api/employees/{eid}',headers={'X-CSRF-Token':admin.csrf}).status_code==409
+    assert admin.delete(f'/api/employees/{eid}',headers={'X-CSRF-Token':admin.csrf}).status_code==400
     assert admin.get(path+'?month=2020-01').json['monthly']==0
     assert admin.get(path+'?month=2020-01').json['total']==19.5
 
