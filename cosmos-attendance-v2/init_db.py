@@ -52,5 +52,10 @@ def initialise():
             result = register(db)
         print(f'Service spare catalogue: {result}', flush=True)
 
+        from customer_import_20261003 import register as register_customers
+        with DB.begin() as db:
+            result = register_customers(db)
+        print(f'Tally customer import: {result}', flush=True)
+
 if __name__ == '__main__':
     initialise()
