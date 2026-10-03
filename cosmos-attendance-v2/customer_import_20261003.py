@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 from sqlalchemy import inspect, text, select
 from app import DB, engine, Customer, CustomerSite
 
@@ -81,7 +82,7 @@ def register(db):
             if c.status!="Active": c.status="Active"; changed=True
             if changed: updated+=1
         else:
-            c=Customer(name=name,gstin=gstin,address=address,status="Active")
+            c=Customer(name=name,gstin=gstin,address=address,status="Active",created_at=datetime.now(timezone.utc))
             db.add(c); db.flush(); c.code=f"CUS-{c.id:04d}"
             by_key[key]=c; created+=1
     return {"created":created,"updated":updated,"duplicates_merged":merged,"total_import_rows":len(CUSTOMERS)}
