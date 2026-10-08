@@ -16,6 +16,7 @@ os.environ['DATABASE_URL'] = 'sqlite:///' + tempfile.mktemp(suffix='.db')
 os.environ['SECRET_KEY'] = 'test-secret-' * 8
 os.environ['FACE_ENCRYPTION_KEY'] = Fernet.generate_key().decode()
 os.environ['ADMIN_PASSWORD'] = 'testing-admin-password'
+os.environ['ADMIN_PIN'] = '9876'
 import app as module
 from init_db import initialise
 
@@ -31,7 +32,7 @@ def database(monkeypatch):
     monkeypatch.setattr(module, 'remove_photo', lambda value: None)
 
 
-def client(code='admin', password='testing-admin-password'):
+def client(code='admin', password='9876'):
     c = module.app.test_client()
     token = c.get('/api/session').json['csrf']
     response = c.post('/api/login', json=dict(code=code, password=password), headers={'X-CSRF-Token':token})
@@ -47,13 +48,11 @@ def post(c, path, data):
 def employee(admin, code='ces001', name='Test Employee'):
     r = post(admin, '/api/employees', dict(code=code, name=name, department='Production', pin='1234'))
     assert r.status_code == 201
-    assert post(admin, f'/api/employees/{r.json["id"]}/enrol', dict(photo='fake', consent=True)).status_code == 200
     return client(code, '1234'), r.json['id']
 
 
 def attendance(c, action='in', **overrides):
-    challenge = post(c, '/api/capture', {}).json['challenge']
-    data = dict(action=action, challenge=challenge, photo='fake', location=dict(lat=11.01,lng=76.96,accuracy=12,timestamp=module.now().timestamp()*1000))
+    data = dict(action=action, location=dict(lat=11.01,lng=76.96,accuracy=12,timestamp=module.now().timestamp()*1000))
     data.update(overrides)
     return post(c, '/api/attendance', data)
 
@@ -63,10 +62,113 @@ def test_authentication_csrf_and_roles():
     assert c.get('/api/employees').status_code == 401
     assert c.post('/api/login', json={}).status_code == 403
     admin = client()
-    worker, eid = employee(admin)
+    created = post(admin, '/api/employees', dict(code='ces001', name='Test Employee', department='Production', pin='1234'))
+    assert created.status_code == 201
+    worker, eid = client('ces001', '1234'), created.json['id']
     assert worker.get('/api/employees').status_code == 403
     assert worker.get('/api/export?month=2026-09').status_code == 403
     assert post(worker, f'/api/employees/{eid}/enrol', dict(photo='fake',consent=True)).status_code == 403
+
+
+def test_customer_and_contact_edits_preserve_history_and_permissions():
+    admin = client()
+    created_worker = post(admin, '/api/employees', dict(code='ces001', name='Worker', department='Production', pin='1234'))
+    assert created_worker.status_code == 201
+    worker = client('ces001', '1234')
+    created = post(admin, '/api/customers', {'name':'Original Co'}).json
+    cid = created['id']
+    contact = post(admin, f'/api/customers/{cid}/contacts', {'name':'Original Person'}).json['id']
+    patch = lambda c,path,data: c.patch(path,json=data,headers={'X-CSRF-Token':c.csrf})
+    assert patch(worker,f'/api/customers/{cid}',{'name':'Intruder'}).status_code == 403
+    assert patch(admin,f'/api/customers/{cid}',{'name':'','status':'Archived'}).status_code == 400
+    assert patch(admin,f'/api/customers/{cid}',{'name':'Updated Co','status':'Archived'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact}',{'name':'Updated Person'}).status_code == 200
+    assert patch(admin,f'/api/customers/{cid}/contacts/{contact+999}',{'name':'Wrong'}).status_code == 404
+    detail = admin.get(f'/api/customers/{cid}').json
+    assert detail['name']=='Updated Co' and detail['status']=='Archived'
+    assert detail['contacts'][0]['name']=='Updated Person'
+    with module.DB() as db:
+        actions=[row.action for row in db.scalars(module.select(module.AuditLog)).all()]
+    assert 'update_customer' in actions and 'update_customer_contact' in actions
+
+
+def test_inventory_purchase_receipt_and_stock_ledger():
+    admin=client()
+    item=post(admin,'/api/stock-items',{'sku':'CR-2MM','category':'Raw material','sub_category':'Sheet','size_dimension':'2 mm','material_finish':'CR','unit':'kg','reorder_level':'10'}).json
+    supplier=post(admin,'/api/suppliers',{'name':'Steel Supplier'}).json
+    po=post(admin,'/api/purchase-orders',{'supplier_id':supplier['id'],'item_id':item['id'],
+                                          'ordered_qty':'20','unit_price':'80'}).json
+    receive=post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'12'})
+    assert receive.status_code==200 and receive.json['status']=='Part received'
+    assert post(admin,f'/api/purchase-orders/{po["id"]}/receive',{'quantity':'9'}).status_code==409
+    issue=post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'4','reason':'Laser cutting'})
+    assert issue.status_code==201 and issue.json['balance']=='8.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'9','reason':'Too much'}).status_code==409
+    rows=admin.get(f'/api/stock-items/{item["id"]}/movements').json
+    assert len(rows)==2 and rows[0]['balance']=='8.000'
+    assert admin.get('/api/stock-items').json[0]['quantity']=='8.000'
+
+
+def test_employee_file_production_maintenance_and_summary():
+    admin=client()
+    employee_id=post(admin,'/api/employees',{'code':'CES010','name':'Siva','department':'Design','pin':'1234'}).json['id']
+    patch=lambda path,data: admin.patch(path,json=data,headers={'X-CSRF-Token':admin.csrf})
+    assert patch(f'/api/employee-files/{employee_id}',{'designation':'Designer','skills':'SolidWorks'}).status_code==200
+    assert admin.get(f'/api/employee-files/{employee_id}').json['profile']['skills']=='SolidWorks'
+    customer=post(admin,'/api/customers',{'name':'Machine Builder'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Telescopic cover'}).json
+    step=post(admin,'/api/production-steps',{'work_order_id':job['id'],'operation':'Laser cutting','sequence':1}).json
+    assert patch(f'/api/production-steps/{step["id"]}',{'status':'Blocked','delay_reason':'Sheet shortage'}).status_code==200
+    asset=post(admin,'/api/company-assets',{'code':'BIKE-01','kind':'Bike','name':'Service bike'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Preventive','description':'Oil change'}).json
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Completed','cost':'800','downtime_hours':'2'}).status_code==200
+    summary=admin.get('/api/management-summary').json
+    assert summary['open_jobs']==1 and summary['blocked_steps']==1 and summary['open_maintenance']==0
+
+
+def test_quote_to_job_material_reservation_and_drawing_approval():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    quote=post(admin,'/api/quotations',{'customer_id':customer['id'],'title':'Machine cover','amount':'12000'}).json
+    assert quote['code'].startswith('QT-')
+    accepted=post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'BFW-123'})
+    assert accepted.status_code==201
+    job_id=accepted.json['work_order']['id']
+    assert post(admin,f'/api/quotations/{quote["id"]}/accept',{'customer_po':'DUP'}).status_code==409
+    item=post(admin,'/api/stock-items',{'sku':'CR-SHEET','category':'Raw material','sub_category':'Sheet','size_dimension':'2 mm','material_finish':'CR','unit':'kg'}).json
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Receive','quantity':'10','reason':'Initial stock'}).status_code==201
+    req=post(admin,f'/api/work-orders/{job_id}/materials',{'item_id':item['id'],'required_qty':'8'}).json
+    assert post(admin,f'/api/job-materials/{req["id"]}/reserve',{'quantity':'8'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['available']=='2.000'
+    assert post(admin,f'/api/stock-items/{item["id"]}/movements',{'kind':'Issue','quantity':'3','reason':'Generic issue'}).status_code==409
+    assert post(admin,f'/api/job-materials/{req["id"]}/issue',{'quantity':'5'}).status_code==200
+    assert admin.get('/api/stock-items').json[0]['quantity']=='5.000'
+    drawing1=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'A','file_reference':'internal/CES-01-A.pdf'}).json
+    drawing2=post(admin,f'/api/work-orders/{job_id}/drawings',{'drawing_no':'CES-01','revision':'B','file_reference':'internal/CES-01-B.pdf'}).json
+    assert post(admin,f'/api/drawings/{drawing1["id"]}/approve',{}).status_code==200
+    assert post(admin,f'/api/drawings/{drawing2["id"]}/approve',{}).status_code==200
+    drawings=admin.get(f'/api/work-orders/{job_id}/drawings').json
+    assert sum(d['approved'] for d in drawings)==1 and drawings[0]['revision']=='B'
+
+
+def test_private_documents_job_card_quality_and_dispatch():
+    admin=client()
+    customer=post(admin,'/api/customers',{'name':'BFW'}).json
+    job=post(admin,'/api/work-orders',{'customer_id':customer['id'],'title':'Cover'}).json
+    jid=job['id']
+    worker_id=post(admin,'/api/employees',{'code':'CES011','name':'Worker','department':'Production','pin':'1234'}).json['id']
+    worker=client('CES011','1234')
+    data={'file':(io.BytesIO(b'%PDF-1.4\nsmall test document'),'drawing.pdf')}
+    uploaded=admin.post(f'/api/documents/job/{jid}',data=data,content_type='multipart/form-data',headers={'X-CSRF-Token':admin.csrf})
+    assert uploaded.status_code==201
+    doc_id=uploaded.json['id']
+    assert worker.get(f'/api/documents/download/{doc_id}').status_code==403
+    assert admin.get(f'/api/documents/download/{doc_id}').data.startswith(b'%PDF-')
+    assert str(jid).encode() in admin.get(f'/api/work-orders/{jid}/job-card').data
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
+    assert post(admin,f'/api/work-orders/{jid}/quality',{'operation':'Final','inspected_qty':'5','accepted_qty':'4','rejected_qty':'1'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'4','dispatch_date':'2026-09-26'}).status_code==201
+    assert post(admin,f'/api/work-orders/{jid}/dispatch',{'quantity':'1','dispatch_date':'2026-09-26'}).status_code==409
 
 
 def test_shift_rules_and_record_isolation():
@@ -84,21 +186,20 @@ def test_shift_rules_and_record_isolation():
     assert 'in_photo' not in row and 'encoding' not in row
 
 
-def test_face_mismatch_and_gps_validation(monkeypatch):
+def test_gps_validation_is_required_without_face_enrolment():
     worker, _ = employee(client())
     for location in ({}, dict(lat=float('nan'),lng=10,accuracy=1,timestamp=1), dict(lat=11,lng=76,accuracy=10,timestamp=1)):
         assert attendance(worker, location=location).status_code == 400
-    monkeypatch.setattr(module, 'face_image', lambda value:(np.ones(128),b'photo'))
-    assert attendance(worker).status_code == 403
     assert worker.get('/api/attendance').json == []
+    assert attendance(worker).status_code == 201
 
 
-def test_failed_storage_does_not_create_attendance(monkeypatch):
+def test_photo_storage_outage_does_not_block_pin_gps_attendance(monkeypatch):
     worker, _ = employee(client())
     def failed(_): raise RuntimeError('Simulated Cloudinary outage')
     monkeypatch.setattr(module, 'upload_photo', failed)
-    assert attendance(worker).status_code == 503
-    assert worker.get('/api/attendance').json == []
+    assert attendance(worker).status_code == 201
+    assert len(worker.get('/api/attendance').json) == 1
 
 
 def test_overnight_checkout(monkeypatch):
@@ -123,14 +224,12 @@ def test_export_formula_safety_and_dates():
     assert admin.get('/api/export?month=2026-99').status_code == 400
 
 
-def test_consent_deactivation_and_encrypted_templates():
+def test_disabled_face_enrolment_and_employee_deactivation():
     admin = client()
     worker, eid = employee(admin)
-    assert post(admin, f'/api/employees/{eid}/enrol',dict(photo='fake',consent=False)).status_code == 400
+    assert post(admin, f'/api/employees/{eid}/enrol',dict(photo='fake',consent=False)).status_code == 410
     with module.DB() as db:
-        encrypted = db.get(module.Employee,eid).encoding
-        assert not encrypted.startswith('[')
-        assert len(json.loads(module.CIPHER.decrypt(encrypted.encode()))) == 128
+        assert db.get(module.Employee,eid).encoding is None
     assert attendance(worker).status_code == 201
     assert post(admin, f'/api/employees/{eid}/active',dict(active=False)).status_code == 409
     assert attendance(worker,'out').status_code == 201
@@ -138,19 +237,179 @@ def test_consent_deactivation_and_encrypted_templates():
     assert worker.get('/api/attendance').status_code == 401
 
 
-def test_successful_challenge_cannot_be_replayed():
+def test_signed_out_session_cannot_submit_attendance():
     worker, _ = employee(client())
-    challenge = post(worker,'/api/capture',{}).json['challenge']
-    data=dict(action='in',challenge=challenge,photo='fake',location=dict(lat=11,lng=76,accuracy=2,timestamp=module.now().timestamp()*1000))
-    assert post(worker,'/api/attendance',data).status_code == 201
-    data['action']='out'
-    assert post(worker,'/api/attendance',data).status_code == 400
+    assert post(worker, '/api/logout', {}).status_code == 200
+    assert attendance(worker).status_code == 403
+    token = worker.get('/api/session').json['csrf']
+    worker.csrf = token
+    assert attendance(worker).status_code == 401
+    with module.DB() as db:
+        assert db.scalar(module.select(module.func.count()).select_from(module.Attendance)) == 0
 
 
 def test_pages_and_security_headers():
     c=module.app.test_client()
     response=c.get('/')
-    assert response.status_code == 200 and 'Cosmos Attendance' in response.text
+    assert response.status_code == 200 and 'Cosmos Employee Portal' in response.text
     assert response.headers['X-Frame-Options'] == 'DENY'
     for path in ('/static/app.js','/static/style.css','/static/favicon.svg'):
         assert c.get(path).status_code == 200
+
+
+def test_maintenance_full_edit_and_storage_access():
+    admin=client()
+    eid=post(admin,'/api/employees',{'code':'ces001','name':'Test Employee','department':'Production','pin':'1234'}).json['id']
+    user=client('ces001','1234')
+    asset=post(admin,'/api/company-assets',{'code':'M1','kind':'Machine','name':'Laser'}).json
+    task=post(admin,'/api/maintenance-tasks',{'asset_id':asset['id'],'task_type':'Repair','description':'Old work'}).json
+    patch=lambda path,data: admin.patch(path,json=data,headers={'X-CSRF-Token':admin.csrf})
+    assert patch(f'/api/company-assets/{asset["id"]}',{'name':'Laser 3015','location':'Unit 2','next_service_date':'2026-10-01'}).status_code==200
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'description':'Replace nozzle','due_date':'2026-10-02','status':'Completed','completed_date':'2026-09-28','cost':'1200','notes':'Checked'}).status_code==200
+    record=admin.get('/api/maintenance-tasks').json[0]
+    assert record['asset_id']==asset['id'] and record['asset']=='Laser 3015'
+    assert record['description']=='Replace nozzle' and record['completed_date']=='2026-09-28'
+    assert patch(f'/api/maintenance-tasks/{task["id"]}',{'status':'Open'}).status_code==200
+    assert admin.get('/api/maintenance-tasks').json[0]['completed_date'] is None
+    assert patch(f'/api/company-assets/{asset["id"]}',{'next_service_date':'bad'}).status_code==400
+    assert user.patch(f'/api/company-assets/{asset["id"]}',json={'name':'Wrong'},headers={'X-CSRF-Token':user.csrf}).status_code==403
+    assert user.get('/api/storage-summary').status_code==403
+    assert admin.get('/api/storage-summary').json['upload_limit_bytes']==2000000
+
+
+def test_employee_points_ledger_validation_permissions_and_corrections():
+    admin = client()
+    eid = post(admin, '/api/employees', dict(code='pointworker', name='Points Worker', department='Service', pin='1234')).json['id']
+    worker = client('pointworker', '1234')
+    path = f'/api/employees/{eid}/points'
+    day = module.now().astimezone(module.LOCAL).date().isoformat()
+    payload = dict(date=day, category='Work performance', points=10, reason='Completed service with verified quality.')
+    assert worker.get(path).status_code == 403
+    assert post(worker, path, payload).status_code == 403
+    for value in [0, 2.5, True, -101]:
+        assert post(admin, path, {**payload, 'points': value}).status_code == 400
+    for key, value in [('reason',' '), ('category','Invalid'), ('date','2999-01-01')]:
+        assert post(admin, path, {**payload, key: value}).status_code == 400
+    assert admin.get(path+'?month=wrong').status_code == 400
+    assert post(admin, path, payload).status_code == 201
+    deducted = post(admin, path, {**payload, 'category': 'Cleanliness', 'points': -4, 'reason': 'Work area left unclean after shift.'})
+    assert deducted.status_code == 201
+    result = admin.get(path).json
+    assert (result['awarded'], result['deducted'], result['net'], result['all_time']) == (10, 4, 6, 6)
+    assert post(admin, path, {**payload, 'date': '2020-01-01', 'points': -20}).status_code == 201
+    assert admin.get(path).json['net'] == 6
+    assert admin.get(path).json['all_time'] == -14
+    void_path = path+f'/{deducted.json["id"]}/void'
+    assert post(worker, void_path, dict(reason='Correction')).status_code == 403
+    assert post(admin, void_path, dict(reason='')).status_code == 400
+    assert post(admin, f'/api/employees/{eid+1}/points/{deducted.json["id"]}/void', dict(reason='Wrong employee')).status_code == 404
+    assert post(admin, void_path, dict(reason='Incorrect employee selected.')).status_code == 200
+    assert post(admin, void_path, dict(reason='Duplicate correction.')).status_code == 409
+    result = admin.get(path).json
+    assert (result['net'], result['deducted'], result['all_time']) == (10, 0, -10)
+    assert len(result['entries']) == 2
+    voided = next(r for r in result['entries'] if r['id'] == deducted.json['id'])
+    assert voided['voided_at'] and voided['voided_by'] and voided['recorded_by']
+    assert admin.delete(f'/api/employees/{eid}', headers={'X-CSRF-Token':admin.csrf}).status_code == 400
+    with module.DB() as db:
+        assert len(db.scalars(module.select(module.AuditLog).where(module.AuditLog.action.like('employee_points_%'))).all()) == 4
+
+
+def test_policy_memos_half_points_rules_thresholds_and_exceptions_review():
+    admin=client()
+    eid=post(admin,'/api/employees',dict(code='memo1',name='Memo Worker',department='Service',pin='1234')).json['id']
+    worker=client('memo1','1234')
+    path=f'/api/employees/{eid}/memos'
+    day=module.now().astimezone(module.LOCAL).date().isoformat()
+    data=dict(date=day,rule_id='emergency_early',points=0.5,details='Unapproved early departure, reviewed.',reviewed=True)
+    assert worker.get(path).status_code==403
+    assert post(worker,path,data).status_code==403
+    assert post(admin,path,{**data,'reviewed':False}).status_code==400
+    for value in [1,0.25,True,-0.5]:
+        assert post(admin,path,{**data,'points':value}).status_code==400
+    first=post(admin,path,data)
+    assert first.status_code==201
+    assert post(admin,path,data).status_code==409
+    assert admin.get(path).json['total']==0.5
+    absence={**data,'rule_id':'absence_no_form','points':3,'details':'Full day absence reviewed with HR.'}
+    assert post(admin,path,absence).status_code==201
+    assert post(admin,path,{**absence,'rule_id':'absence_no_notice'}).status_code==409
+    assert post(admin,path,{**data,'rule_id':'cleanliness','points':2.5}).status_code==400
+    # Independent reviewed records used to exercise each threshold exactly.
+    for amount,expected in [(3,0),(3,0),(2.5,12),(3,12),(1,16),(3,16),(1,20)]:
+        payload={**data,'rule_id':'performance','points':amount,'details':f'Distinct verified incident at total stage {expected}, index {admin.get(path).json["total"]}'}
+        assert post(admin,path,payload).status_code==201
+        assert admin.get(path).json['threshold']==expected
+    result=admin.get(path).json
+    assert result['total']==20
+    assert result['monthly']==20
+    assert len(result['rules'])==11
+    voidpath=path+f'/{first.json["id"]}/void'
+    assert post(worker,voidpath,dict(reason='Correction')).status_code==403
+    assert post(admin,voidpath,dict(reason='Reviewed approved permission.')).status_code==200
+    assert post(admin,voidpath,dict(reason='Repeat correction')).status_code==409
+    result=admin.get(path).json
+    assert result['total']==19.5 and result['threshold']==16
+    assert any(r['voided_at'] for r in result['entries'])
+    assert admin.delete(f'/api/employees/{eid}',headers={'X-CSRF-Token':admin.csrf}).status_code==400
+    assert admin.get(path+'?month=2020-01').json['monthly']==0
+    assert admin.get(path+'?month=2020-01').json['total']==19.5
+
+
+def test_deadline_reminders_custom_dates_permissions_and_completed_filter():
+    admin=client()
+    created=post(admin,'/api/employees',dict(code='rem1',name='Worker',department='Service',pin='1234'))
+    worker=client('rem1','1234')
+    path='/api/deadline-reminders'
+    assert worker.get(path).status_code==403
+    today=module.now().astimezone(module.LOCAL).date()
+    for offset in [-1,0,1,8]:
+        assert post(admin,path,dict(title=f'Task {offset}',due_date=(today+timedelta(days=offset)).isoformat())).status_code==201
+    assert post(admin,path,dict(title='Bad date',due_date='invalid')).status_code==400
+    data=admin.get(path).json
+    assert (data['overdue'],data['due_today'],data['next_week'])==(1,1,1)
+    assert len(data['items'])==4
+    rid=data['items'][0]['id']
+    assert worker.patch(path+f'/{rid}',json=dict(completed=True),headers={'X-CSRF-Token':worker.csrf}).status_code==403
+    assert admin.patch(path+f'/{rid}',json=dict(completed=True),headers={'X-CSRF-Token':admin.csrf}).status_code==200
+    assert admin.get(path).json['overdue']==0
+    assert len(admin.get(path).json['items'])==3
+    with module.DB.begin() as db:
+        for state in ['Planned','Completed','Cancelled']:
+            db.add(module.DailyPlan(employee_id=created.json['id'],work_date=today.isoformat(),title='Plan '+state,estimated_hours=1,status=state,created_at=module.now()))
+    plans=[r for r in admin.get(path).json['items'] if r['kind']=='Planned task']
+    assert len(plans)==1 and plans[0]['title']=='Plan Planned'
+
+
+def test_planning_preview_and_capacity_aware_assignment():
+    admin=client()
+    def add(code,name,department):
+        return post(admin,'/api/employees',dict(code=code,name=name,department=department,pin='1234')).json['id']
+    first=add('plan01','Asha','Production')
+    second=add('plan02','Bala','Production')
+    design=add('plan03','Dev','Design')
+    worker=client('plan01','1234')
+    path='/api/planning/workload?date=2026-10-01&department=Production&estimated_hours=2&daily_capacity=8'
+    assert worker.get(path).status_code==403
+    initial=admin.get(path).json
+    assert len(initial['employees'])==2 and initial['recommended_employee_id']==first
+    assert initial['employees'][0]['remaining_hours']==8
+    payload=dict(date='2026-10-01',title='Frame assembly',department='Production',estimated_hours=7,daily_capacity=8)
+    assigned=post(admin,'/api/daily-plans',payload)
+    assert assigned.status_code==201 and assigned.json['employee_id']==first
+    preview=admin.get(path).json
+    assert preview['recommended_employee_id']==second
+    assert next(e for e in preview['employees'] if e['id']==first)['fits'] is False
+    assigned2=post(admin,'/api/daily-plans',{**payload,'title':'Second frame'})
+    assert assigned2.status_code==201 and assigned2.json['employee_id']==second
+    assert admin.get(path).json['recommended_employee_id'] is None
+    assert post(admin,'/api/daily-plans',{**payload,'estimated_hours':2}).status_code==409
+    assert post(admin,'/api/daily-plans',{**payload,'estimated_hours':2,'daily_capacity':-1}).status_code==400
+    # Manual assignments are an explicit override, shown in the interface.
+    manual=post(admin,'/api/daily-plans',{**payload,'employee_id':first,'estimated_hours':2})
+    assert manual.status_code==201
+    assert next(e for e in admin.get(path).json['employees'] if e['id']==first)['planned_hours']==9
+    assert admin.patch('/api/daily-plans/'+str(assigned2.json['id']),json=dict(status='Cancelled'),headers={'X-CSRF-Token':admin.csrf}).status_code==200
+    assert admin.get(path).json['recommended_employee_id']==second
+    assert admin.get(path.replace('daily_capacity=8','daily_capacity=NaN')).status_code==400
+    assert admin.get(path.replace('2026-10-01','invalid')).status_code==400
