@@ -1,5 +1,6 @@
 """Tamil training pilot. Quiz completion is never equipment authorisation."""
 import json
+from pathlib import Path
 from flask import abort, request
 from sqlalchemy import ForeignKey, String, Text, DateTime, select
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +35,17 @@ QUESTIONS = [
     ('வினாத்தேர்வில் தேர்ச்சி பெற்றதும்?', ['நடைமுறைச் சோதனையும் தனி வேலை அனுமதியும் தேவை', 'எந்த மெஷினையும் இயக்கலாம்', 'பாதுகாப்பு உடை தேவையில்லை'], 0, 'வினாத்தேர்வு மட்டும் இயந்திரம் இயக்கும் அனுமதி அல்ல.'),
 ]
 
+
+LESSON.update(role='Welding / fabrication staff', video_url='/static/training-media/welding.mp4',
+              poster_url='/static/training-media/welding.jpg', narration_ready=True,
+              status='Cartoon awareness video — site supervisor review required')
+LESSONS = {LESSON['id']: LESSON}
+QUESTION_BANK = {LESSON['id']: QUESTIONS}
+for _module in json.loads(Path(__file__).with_name('training_modules.json').read_text()):
+    QUESTION_BANK[_module['id']] = _module.pop('questions')
+    LESSONS[_module['id']] = _module
+
+
 def register_training(app, Base, DB, Employee, login_required, now, AuditLog):
     class TrainingAttempt(Base):
         __tablename__ = 'training_attempts'
@@ -52,6 +64,7 @@ def register_training(app, Base, DB, Employee, login_required, now, AuditLog):
         e = db.get(Employee, r.employee_id)
         reviewer = db.get(Employee, r.reviewer_id) if r.reviewer_id else None
         return dict(id=r.id, employee=e.name, code=e.code, lesson_id=r.lesson_id,
+                    lesson_title=LESSONS.get(r.lesson_id, {}).get('title', r.lesson_id),
                     score=r.score, total=10, passed=r.score >= 8,
                     date=r.created_at.isoformat(), review=r.review,
                     reviewer=reviewer.name if reviewer else None, notes=r.review_notes,
@@ -61,32 +74,40 @@ def register_training(app, Base, DB, Employee, login_required, now, AuditLog):
     @app.get('/api/training')
     @login_required()
     def training_catalogue():
+        lesson_id = request.args.get('lesson_id', LESSON['id'])
+        if lesson_id not in LESSONS:
+            abort(400, 'Unknown lesson version.')
+        lesson = LESSONS[lesson_id]
+        questions = QUESTION_BANK[lesson_id]
         with DB() as db:
             query = select(TrainingAttempt).order_by(TrainingAttempt.id.desc()).limit(200)
             if not request.employee.admin:
                 query = query.where(TrainingAttempt.employee_id == request.employee.id)
-            return dict(lesson=LESSON, questions=[dict(id=i, text=q[0], options=q[1]) for i,q in enumerate(QUESTIONS)],
+            return dict(lesson=lesson, lessons=[dict(id=l['id'], title=l['title'], role=l['role']) for l in LESSONS.values()],
+                        questions=[dict(id=i, text=q[0], options=q[1]) for i,q in enumerate(questions)],
                         attempts=[serialise(r, db) for r in db.scalars(query)], pass_mark=8,
-                        record_limit=200, video_ready=False, narration_ready=False)
+                        record_limit=200, video_ready=True, narration_ready=lesson['narration_ready'])
 
     @app.post('/api/training/attempts')
     @login_required()
     def submit_training():
         data = request.get_json()
         answers = data.get('answers')
-        if data.get('lesson_id') != LESSON['id']:
+        if data.get('lesson_id') not in LESSONS:
             abort(400, 'Unknown lesson version.')
         if data.get('reviewed_lesson') is not True:
             abort(400, 'Review the lesson before submitting.')
         if not isinstance(answers, list) or len(answers) != 10 or any(type(a) is not int or a not in range(3) for a in answers):
             abort(400, 'Answer all ten questions.')
-        score = sum(a == q[2] for a,q in zip(answers, QUESTIONS))
+        lesson_id = data['lesson_id']
+        questions = QUESTION_BANK[lesson_id]
+        score = sum(a == q[2] for a,q in zip(answers, questions))
         with DB.begin() as db:
-            row = TrainingAttempt(employee_id=request.employee.id, lesson_id=LESSON['id'],
+            row = TrainingAttempt(employee_id=request.employee.id, lesson_id=lesson_id,
                                   score=score, answers=json.dumps(answers), created_at=now())
             db.add(row); db.flush()
             result = serialise(row, db)
-            result['feedback'] = [dict(question=q[0], correct= a==q[2], correct_answer=q[1][q[2]], explanation=q[3]) for a,q in zip(answers,QUESTIONS)]
+            result['feedback'] = [dict(question=q[0], correct= a==q[2], correct_answer=q[1][q[2]], explanation=q[3]) for a,q in zip(answers,questions)]
             return result, 201
 
     @app.patch('/api/training/attempts/<int:attempt_id>/review')

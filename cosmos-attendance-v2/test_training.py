@@ -32,3 +32,26 @@ def test_practical_review_permissions_and_audit():
     assert admin.patch(f'/api/training/attempts/{own["id"]}/review',json=data,headers={'X-CSRF-Token':admin.csrf}).status_code==403
     failed=attempt(worker,[0]*10).json
     assert admin.patch(f'/api/training/attempts/{failed["id"]}/review',json=data,headers={'X-CSRF-Token':admin.csrf}).status_code==400
+
+
+def test_role_modules_score_the_selected_lesson_and_preserve_history():
+    import training
+    admin=client();worker,_=employee(admin)
+    catalogue=worker.get('/api/training').json
+    assert len(catalogue['lessons'])==12
+    for metadata in catalogue['lessons']:
+        lesson_id=metadata['id']
+        selected=worker.get('/api/training',query_string={'lesson_id':lesson_id}).json
+        assert selected['lesson']['id']==lesson_id
+        assert len(selected['questions'])==10
+        assert 'questions' not in selected['lesson']
+        assert all('correct_answer' not in q and 'answer' not in q for q in selected['questions'])
+        answers=[q[2] for q in training.QUESTION_BANK[lesson_id]]
+        result=post(worker,'/api/training/attempts',dict(lesson_id=lesson_id,reviewed_lesson=True,answers=answers))
+        assert result.status_code==201
+        assert result.json['score']==10 and result.json['lesson_id']==lesson_id
+        assert result.json['lesson_title']==metadata['title']
+    records=worker.get('/api/training').json['attempts']
+    assert len(records)==12 and len({r['lesson_id'] for r in records})==12
+    assert worker.get('/api/training?lesson_id=unknown').status_code==400
+    assert post(worker,'/api/training/attempts',dict(lesson_id='unknown',reviewed_lesson=True,answers=ANSWERS)).status_code==400
