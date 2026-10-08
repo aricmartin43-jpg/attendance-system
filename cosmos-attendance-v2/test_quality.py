@@ -18,6 +18,7 @@ def api_routes():
 
 ROUTES=list(api_routes())
 EMPLOYEE_ROUTES={
+ ('GET','/api/training'),('POST','/api/training/attempts'),
  ('GET','/api/attendance'),('GET','/api/my-status'),('POST','/api/attendance'),('POST','/api/capture'),
  ('GET','/api/ecosystem/summary'),('GET','/api/work-reports'),('POST','/api/work-reports'),
  ('GET','/api/issues'),('POST','/api/issues'),('GET','/api/meetings'),('PATCH','/api/meeting-actions/999999'),

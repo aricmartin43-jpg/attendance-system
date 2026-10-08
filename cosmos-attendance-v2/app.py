@@ -3069,7 +3069,7 @@ def delete_customer(customer_id):
 
 def employee_deletion_scope(db,e):
     ids=lambda model,condition:list(db.scalars(select(model.id).where(condition).order_by(model.id)))
-    groups={'Employee profiles':[e.id],'Attendance records':ids(Attendance,Attendance.employee_id==e.id),
+    groups={'Training attempts':ids(TrainingAttempt,TrainingAttempt.employee_id==e.id),'Employee profiles':[e.id],'Attendance records':ids(Attendance,Attendance.employee_id==e.id),
             'Personal documents':ids(PrivateDocument,(PrivateDocument.owner_type=='employee') & (PrivateDocument.owner_id==e.id))}
     for label,model in [('Employee files',EmployeeProfile),('Points entries',EmployeePoint),('Policy memos',EmployeeMemo),('Plans',DailyPlan),('Work reports',WorkReport),('Reported issues',WorkIssue),('Meeting actions',MeetingAction),('Work assignments',WorkOrderAssignment),('Biometric credentials',WebAuthnCredential)]:
         groups[label]=ids(model,model.employee_id==e.id)
@@ -3098,7 +3098,7 @@ def permanently_delete_employee(employee_id):
         db.execute(delete(WorkReportLink).where(WorkReportLink.work_report_id.in_(groups['Work reports'])))
         for model,field in [(WorkOrder,'job_owner_id'),(WorkOrder,'supervisor_id'),(WorkOrder,'approved_by_id'),(ProductionStep,'assigned_id'),(MaintenanceTask,'assigned_id'),(WorkReport,'verified_by'),(EmployeeProfile,'supervisor_id'),(WorkIssue,'assigned_to'),(DrawingRevision,'approved_by'),(Meeting,'created_by'),(StockMovement,'actor_id'),(PurchaseOrder,'created_by'),(PrivateDocument,'uploaded_by'),(QualityCheck,'inspector_id'),(DispatchRecord,'created_by'),(CustomerUpdate,'created_by'),(AuditLog,'admin_id')]:
             db.execute(update(model).where(getattr(model,field)==e.id).values({field:None}))
-        for label,model in [('Personal documents',PrivateDocument),('Employee files',EmployeeProfile),('Points entries',EmployeePoint),('Policy memos',EmployeeMemo),('Plans',DailyPlan),('Work reports',WorkReport),('Reported issues',WorkIssue),('Meeting actions',MeetingAction),('Work assignments',WorkOrderAssignment),('Biometric credentials',WebAuthnCredential),('Attendance records',Attendance)]:
+        for label,model in [('Training attempts',TrainingAttempt),('Personal documents',PrivateDocument),('Employee files',EmployeeProfile),('Points entries',EmployeePoint),('Policy memos',EmployeeMemo),('Plans',DailyPlan),('Work reports',WorkReport),('Reported issues',WorkIssue),('Meeting actions',MeetingAction),('Work assignments',WorkOrderAssignment),('Biometric credentials',WebAuthnCredential),('Attendance records',Attendance)]:
             db.execute(delete(model).where(model.id.in_(groups[label])))
         db.add(AuditLog(admin_id=request.employee.id,action='delete_employee',target=str(e.id),detail=json.dumps({k:len(v) for k,v in groups.items()}),created_at=now()))
         db.delete(e)
@@ -3327,3 +3327,7 @@ def confirm_customer_update_sent(update_id):
             row.status='Sent (manual)';row.channel=data['channel'];row.sent_at=now()
             db.add(AuditLog(admin_id=request.employee.id,action='customer_update_marked_sent',target=str(row.id),detail=row.channel,created_at=now()))
         return customer_update_json(row)
+
+
+from training import register_training
+TrainingAttempt = register_training(app, Base, DB, Employee, login_required, now, AuditLog)

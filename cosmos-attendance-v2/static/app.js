@@ -438,6 +438,7 @@ async function refreshHome(){
 }
 
 const views = {
+  training:['Safety training','தமிழ் பயிற்சி மற்றும் மதிப்பீடு','◈'],
   reminders:['Deadline reminders','Track overdue work, upcoming dates and custom reminders.','◷'],
   home:['Employee Portal','People · Productivity · Progress','▦'],
   overview:['Attendance overview',"A clear view of your team's working day.",'▦'],
@@ -461,13 +462,14 @@ const views = {
   checkin:['My attendance','Check in, get to work, and make today count.','◎']
 };
 async function navigate(view) {
-  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','planning','work','issues','meetings'].includes(view))) throw new Error('This page is not available.');
+  if (!views[view] || (user.admin ? view === 'checkin' : !['checkin','jobs','planning','work','issues','meetings','training'].includes(view))) throw new Error('This page is not available.');
   currentView = view;
   document.body.classList.toggle("dashboard-view",view==="home");
   closeNavigation();
   document.querySelectorAll('.panel-view').forEach(el => el.hidden = el.id !== view+'-panel');
   document.querySelectorAll('.nav-button').forEach(el => {el.classList.toggle('active',el.dataset.view===view);if(el.dataset.view===view)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
   $('page-title').textContent=views[view][0]; $('page-subtitle').textContent=views[view][1]; $('breadcrumb').textContent=views[view][0];
+  if(view === 'training') await refreshTraining();
   if(view === 'home') {await refreshHome();await refreshReminderBadge();}
   if(view === 'reminders') await refreshReminders();
   if(view === 'overview') await refreshOverview();
@@ -500,9 +502,9 @@ async function showApp() {
   const groups=user.admin?[
     ['Workspace',['home','reminders']],['Customer operations',['customers','quotations','machines']],
     ['Operations',['planning','jobs','job-files','production','inventory','purchasing','maintenance']],
-    ['People & collaboration',['overview','employees','work','issues','meetings']],
+    ['People & collaboration',['overview','employees','work','issues','meetings','training']],
     ['Insights',['analytics','reports','ecosystem']]
-  ]:[['My workspace',['checkin','planning','jobs','work','issues','meetings']]];
+  ]:[['My workspace',['checkin','planning','jobs','work','issues','meetings','training']]];
   const names=groups.flatMap(g=>g[1]);
   document.querySelectorAll('.admin-employee-field').forEach(el=>el.hidden=!user.admin);
   $('add-meeting').hidden=!user.admin;
