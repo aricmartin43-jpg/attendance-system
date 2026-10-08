@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/workspace.css?v=cosmos-location-5">
   <script src="/static/location.js?v=cosmos-location-5" defer></script>
   <script src="/static/app.js?v=cosmos-location-5" defer></script>
+<script src="/static/training.js?v=1" defer></script><link rel="stylesheet" href="/static/training.css?v=1">
 </head>
 <body>
   <div id="login-view" class="login-layout">
@@ -66,6 +67,7 @@
 
       <section id="checkin-panel" class="panel-view" hidden><div class="attendance-grid"><article class="section-card checkin-card"><span class="eyebrow accent">YOUR WORKING DAY</span><h2 id="greeting">Hello</h2><div class="clock" id="clock">--:--</div><p id="employee-status" class="status-text">Loading attendance…</p><button class="primary wide" id="start-attendance">Check in</button><div class="attendance-location-box"><p id="attendance-location-status" role="status" aria-live="polite">Location is requested when you mark attendance.</p><button type="button" class="secondary wide" id="test-location">Check location without marking attendance</button><details id="attendance-location-help"><summary>Help with location access</summary><ol><li>Open this portal directly in Chrome or Safari. If you opened a link inside WhatsApp or another app, use its menu to open the link in your browser.</li><li>Turn on Location Services in your phone settings. Allow your browser to use location while you are using it, with precise location enabled where available.</li><li>In the browser’s settings for this website, set Location to Allow. Reload the page after changing permission.</li><li>Keep Wi-Fi or mobile data on. If the signal is weak inside the factory, try near a window or outdoors. Set the phone date and time to automatic.</li></ol><p>Use “Check location” to test permission and signal. This does not record a check-in or check-out. If it still fails, send the displayed error to your administrator.</p></details></div><div class="steps"><span>01 · Login</span><span>02 · GPS</span><span>03 · Record</span></div></article><article class="section-card details-card"><span class="eyebrow">HOW IT WORKS</span><h2>A simple secure check-in.</h2><ol><li><strong>Sign in securely</strong><p>Use your employee ID and 4-digit PIN.</p></li><li><strong>Allow location access</strong><p>GPS is captured only when you check in or check out.</p></li><li><strong>Confirm attendance</strong><p>Your signed-in employee account and current GPS location are recorded.</p></li></ol><p class="help">Face recognition is disabled. No attendance photo is required.</p></article></div><div class="section-card"><div class="section-heading"><h2>Today's attendance</h2></div><div id="my-table"></div></div></section>
 
+      <section id="training-panel" class="panel-view" lang="ta" hidden><div id="training-content"></div></section>
       <section id="ecosystem-panel" class="panel-view" hidden>
         <div class="stats">
           <article class="stat"><span>Work reports</span><strong id="eco-work">0</strong><small>Recorded work history</small></article>
